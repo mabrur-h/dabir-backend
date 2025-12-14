@@ -1,3 +1,4 @@
+import http from 'http';
 import { createLogger } from '../utils/logger.js';
 import { redisConnection, closeQueueConnections } from '../services/queue/queue.service.js';
 import { closeDatabaseConnection } from '../db/index.js';
@@ -49,11 +50,30 @@ async function startWorkers() {
 
     logger.info(`🎉 All ${workers.length} workers started successfully`);
 
+    // Start health check server for Cloud Run
+    const PORT = process.env.PORT || 8080;
+    const server = http.createServer((req, res) => {
+      if (req.url === '/health' || req.url === '/') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'healthy', workers: workers.length }));
+      } else {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+
+    server.listen(PORT, () => {
+      logger.info(`✅ Health check server listening on port ${PORT}`);
+    });
+
     // Graceful shutdown
     const shutdown = async (signal: string) => {
       logger.info({ signal }, 'Received shutdown signal, stopping workers...');
 
       try {
+        // Close health check server
+        server.close();
+
         // Close all workers
         await Promise.all(
           workers.map(async (worker) => {
