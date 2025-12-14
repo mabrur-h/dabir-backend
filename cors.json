@@ -1,0 +1,8 @@
+[
+  {
+    "origin": ["*"],
+    "method": ["GET", "HEAD", "PUT", "POST", "DELETE", "PATCH", "OPTIONS"],
+    "responseHeader": ["Content-Type", "Content-Length", "Content-Range", "Upload-Offset", "Upload-Length", "Tus-Resumable", "Location", "X-Lecture-Id"],
+    "maxAgeSeconds": 3600
+  }
+]

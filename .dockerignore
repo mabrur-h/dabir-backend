@@ -1,0 +1,54 @@
+# Dependencies
+node_modules/
+
+# Build output (will be built in container)
+dist/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Credentials
+credentials/
+*.json.key
+service-account*.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Tests
+tests/
+coverage/
+*.test.ts
+*.spec.ts
+
+# Development files
+docker-compose.yml
+.prettierrc
+eslint.config.js
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Temp files
+tmp/
+temp/
+uploads/
