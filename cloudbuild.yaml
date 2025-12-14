@@ -144,7 +144,7 @@ steps:
       - '--set-env-vars'
       - 'NODE_ENV=production,GCP_PROJECT_ID=$PROJECT_ID,GCS_BUCKET_NAME=${_GCS_BUCKET},GCP_REGION=${_REGION}'
       - '--set-secrets'
-      - 'DATABASE_URL=DATABASE_URL:latest,REDIS_URL=REDIS_URL:latest'
+      - 'DATABASE_URL=DATABASE_URL:latest,REDIS_URL=REDIS_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest'
     id: 'deploy-worker'
     waitFor: ['push-worker']
 
