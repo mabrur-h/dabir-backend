@@ -31,7 +31,7 @@ const start = async () => {
     process.on('SIGTERM', () => shutdown('SIGTERM'));
     process.on('SIGINT', () => shutdown('SIGINT'));
   } catch (error) {
-    logger.fatal({ error }, 'Failed to start server');
+    logger.fatal({ error, message: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined }, 'Failed to start server');
     process.exit(1);
   }
 };

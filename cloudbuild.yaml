@@ -1,6 +1,9 @@
 # Cloud Build configuration for CI/CD
 # Automatically builds and deploys when code is pushed to GitHub
 # Trigger this via: GitHub push → Cloud Build Trigger → Auto Deploy
+#
+# PREREQUISITE: Create the Artifact Registry repository first:
+# gcloud artifacts repositories create dabir --repository-format=docker --location=europe-west1
 
 substitutions:
   _REGION: europe-west1
@@ -13,16 +16,6 @@ substitutions:
   _AR_REPO: dabir
 
 steps:
-  # Step 0: Create Artifact Registry repository if it doesn't exist
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    entrypoint: bash
-    args:
-      - '-c'
-      - |
-        gcloud artifacts repositories describe ${_AR_REPO} --location=${_REGION} || \
-        gcloud artifacts repositories create ${_AR_REPO} --repository-format=docker --location=${_REGION} --description="DABIR Docker images"
-    id: 'create-repo'
-
   # Build API image
   - name: 'gcr.io/cloud-builders/docker'
     args:
@@ -35,7 +28,6 @@ steps:
       - 'Dockerfile'
       - '.'
     id: 'build-api'
-    waitFor: ['create-repo']
 
   # Build Worker image
   - name: 'gcr.io/cloud-builders/docker'
@@ -49,7 +41,6 @@ steps:
       - 'Dockerfile.worker'
       - '.'
     id: 'build-worker'
-    waitFor: ['create-repo']
 
   # Push API image
   - name: 'gcr.io/cloud-builders/docker'
