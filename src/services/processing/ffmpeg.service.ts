@@ -88,9 +88,9 @@ export function getMediaInfo(inputPath: string): Promise<MediaInfo> {
         format: format.format_name || 'unknown',
         audioCodec: audioStream?.codec_name,
         videoCodec: videoStream?.codec_name,
-        sampleRate: audioStream?.sample_rate ? parseInt(audioStream.sample_rate, 10) : undefined,
+        sampleRate: audioStream?.sample_rate ? Number(audioStream.sample_rate) : undefined,
         channels: audioStream?.channels,
-        bitrate: format.bit_rate ? parseInt(format.bit_rate, 10) : undefined,
+        bitrate: format.bit_rate ? Number(format.bit_rate) : undefined,
       });
     });
   });

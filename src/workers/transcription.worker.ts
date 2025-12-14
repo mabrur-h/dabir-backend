@@ -39,7 +39,7 @@ async function processTranscription(
     // Transcribe audio using Gemini
     await job.updateProgress(20);
     const startTime = Date.now();
-    const result = await geminiService.transcribeAudio(audioGcsUri, language);
+    const result = await geminiService.transcribeAudio(audioGcsUri);
     const processingTimeMs = Date.now() - startTime;
 
     await job.updateProgress(70);

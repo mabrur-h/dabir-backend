@@ -21,11 +21,12 @@ export function createTusServer(): TusServer {
   }
 
   // Create GCS store for tus
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const store = new GCSStore({
     bucket: config.gcp.bucketName,
     projectId: config.gcp.projectId,
     keyFilename: config.gcp.credentials,
-  });
+  } as any);
 
   tusServer = new TusServer({
     path: '/api/v1/uploads',
@@ -96,7 +97,7 @@ export function createTusServer(): TusServer {
 
         const lecture = await lectureService.createLecture({
           userId,
-          title: title || null,
+          title: title ?? undefined,
           originalFilename: filename,
           gcsUri,
           fileSizeBytes: upload.size || 0,
@@ -183,7 +184,7 @@ export function getTusHandler() {
     }
 
     // Handle the request
-    return server.handle(req, res);
+    await server.handle(req, res);
   };
 }
 

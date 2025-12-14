@@ -46,7 +46,7 @@ async function processSummarization(
     await job.updateProgress(20);
 
     // Summarize using Gemini
-    const result = await geminiService.summarizeTranscription(transcription.fullText, language);
+    const result = await geminiService.summarizeTranscription(transcription.fullText);
 
     await job.updateProgress(60);
 
