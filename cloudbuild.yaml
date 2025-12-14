@@ -4,45 +4,58 @@
 
 substitutions:
   _REGION: europe-west1
-  _API_SERVICE_NAME: uznotes-api
-  _WORKER_SERVICE_NAME: uznotes-worker
+  _API_SERVICE_NAME: dabir-api
+  _WORKER_SERVICE_NAME: dabir-worker
   _GCS_BUCKET: ${PROJECT_ID}-uploads
-  _SERVICE_ACCOUNT: uznotes-api@${PROJECT_ID}.iam.gserviceaccount.com
-  _VPC_CONNECTOR: uznotes-connector
-  _DB_INSTANCE: uznotes-db
+  _SERVICE_ACCOUNT: dabir-api@${PROJECT_ID}.iam.gserviceaccount.com
+  _VPC_CONNECTOR: dabir-connector
+  _DB_INSTANCE: dabir-db
+  _AR_REPO: dabir
 
 steps:
+  # Step 0: Create Artifact Registry repository if it doesn't exist
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        gcloud artifacts repositories describe ${_AR_REPO} --location=${_REGION} || \
+        gcloud artifacts repositories create ${_AR_REPO} --repository-format=docker --location=${_REGION} --description="DABIR Docker images"
+    id: 'create-repo'
+
   # Build API image
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
       - '-t'
-      - 'gcr.io/$PROJECT_ID/${_API_SERVICE_NAME}:$COMMIT_SHA'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_API_SERVICE_NAME}:$COMMIT_SHA'
       - '-t'
-      - 'gcr.io/$PROJECT_ID/${_API_SERVICE_NAME}:latest'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_API_SERVICE_NAME}:latest'
       - '-f'
       - 'Dockerfile'
       - '.'
     id: 'build-api'
+    waitFor: ['create-repo']
 
   # Build Worker image
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
       - '-t'
-      - 'gcr.io/$PROJECT_ID/${_WORKER_SERVICE_NAME}:$COMMIT_SHA'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_WORKER_SERVICE_NAME}:$COMMIT_SHA'
       - '-t'
-      - 'gcr.io/$PROJECT_ID/${_WORKER_SERVICE_NAME}:latest'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_WORKER_SERVICE_NAME}:latest'
       - '-f'
       - 'Dockerfile.worker'
       - '.'
     id: 'build-worker'
+    waitFor: ['create-repo']
 
   # Push API image
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
-      - 'gcr.io/$PROJECT_ID/${_API_SERVICE_NAME}:$COMMIT_SHA'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_API_SERVICE_NAME}:$COMMIT_SHA'
     id: 'push-api'
     waitFor: ['build-api']
 
@@ -50,7 +63,7 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
-      - 'gcr.io/$PROJECT_ID/${_API_SERVICE_NAME}:latest'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_API_SERVICE_NAME}:latest'
     id: 'push-api-latest'
     waitFor: ['build-api']
 
@@ -58,7 +71,7 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
-      - 'gcr.io/$PROJECT_ID/${_WORKER_SERVICE_NAME}:$COMMIT_SHA'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_WORKER_SERVICE_NAME}:$COMMIT_SHA'
     id: 'push-worker'
     waitFor: ['build-worker']
 
@@ -66,7 +79,7 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
-      - 'gcr.io/$PROJECT_ID/${_WORKER_SERVICE_NAME}:latest'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_WORKER_SERVICE_NAME}:latest'
     id: 'push-worker-latest'
     waitFor: ['build-worker']
 
@@ -78,7 +91,7 @@ steps:
       - 'deploy'
       - '${_API_SERVICE_NAME}'
       - '--image'
-      - 'gcr.io/$PROJECT_ID/${_API_SERVICE_NAME}:$COMMIT_SHA'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_API_SERVICE_NAME}:$COMMIT_SHA'
       - '--region'
       - '${_REGION}'
       - '--platform'
@@ -115,7 +128,7 @@ steps:
       - 'deploy'
       - '${_WORKER_SERVICE_NAME}'
       - '--image'
-      - 'gcr.io/$PROJECT_ID/${_WORKER_SERVICE_NAME}:$COMMIT_SHA'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_WORKER_SERVICE_NAME}:$COMMIT_SHA'
       - '--region'
       - '${_REGION}'
       - '--platform'
@@ -145,10 +158,10 @@ steps:
     waitFor: ['push-worker']
 
 images:
-  - 'gcr.io/$PROJECT_ID/${_API_SERVICE_NAME}:$COMMIT_SHA'
-  - 'gcr.io/$PROJECT_ID/${_API_SERVICE_NAME}:latest'
-  - 'gcr.io/$PROJECT_ID/${_WORKER_SERVICE_NAME}:$COMMIT_SHA'
-  - 'gcr.io/$PROJECT_ID/${_WORKER_SERVICE_NAME}:latest'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_API_SERVICE_NAME}:$COMMIT_SHA'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_API_SERVICE_NAME}:latest'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_WORKER_SERVICE_NAME}:$COMMIT_SHA'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_WORKER_SERVICE_NAME}:latest'
 
 options:
   logging: CLOUD_LOGGING_ONLY
