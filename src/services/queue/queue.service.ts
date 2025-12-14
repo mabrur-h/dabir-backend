@@ -1,5 +1,8 @@
 import { Queue, QueueEvents } from 'bullmq';
-import IORedis from 'ioredis';
+import RedisImport from 'ioredis';
+// Handle ESM/CJS interop for ioredis
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const Redis = (RedisImport as any).default ?? RedisImport;
 import { config } from '../../config/index.js';
 import { QUEUE_NAMES } from '../../config/constants.js';
 import { createLogger } from '../../utils/logger.js';
@@ -11,16 +14,20 @@ import type {
 
 const logger = createLogger('queue');
 
-// Redis connection
-export const redisConnection = new IORedis(config.redis.url, {
+// Redis connection - enable TLS for Upstash (rediss://)
+const redisUrl = config.redis.url;
+const isTLS = redisUrl.startsWith('rediss://');
+
+export const redisConnection = new Redis(redisUrl, {
   maxRetriesPerRequest: null,
+  tls: isTLS ? {} : undefined,
 });
 
 redisConnection.on('connect', () => {
   logger.info('Connected to Redis');
 });
 
-redisConnection.on('error', (err) => {
+redisConnection.on('error', (err: Error) => {
   logger.error({ err }, 'Redis connection error');
 });
 
