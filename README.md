@@ -1,4 +1,4 @@
-# UzNotes-AI
+# DABIR-AI
 
 AI-powered voice notetaker backend that transcribes and summarizes audio/video lectures with excellent Uzbek language support using Gemini 2.5 Flash.
 
