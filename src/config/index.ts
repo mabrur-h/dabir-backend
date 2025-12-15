@@ -10,8 +10,11 @@ const envSchema = z.object({
   // Database
   DATABASE_URL: z.string().url(),
 
-  // Redis
-  REDIS_URL: z.string().url(),
+  // Redis (supports redis:// and rediss:// schemes)
+  REDIS_URL: z.string().refine(
+    (url) => url.startsWith('redis://') || url.startsWith('rediss://'),
+    { message: 'Must be a valid Redis URL (redis:// or rediss://)' }
+  ),
 
   // Google Cloud
   GCP_PROJECT_ID: z.string(),
