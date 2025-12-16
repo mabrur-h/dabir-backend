@@ -26,6 +26,9 @@ export const users = pgTable(
     email: varchar('email', { length: 255 }).unique(),
     passwordHash: varchar('password_hash', { length: 255 }),
 
+    // Google auth (optional)
+    googleId: varchar('google_id', { length: 255 }).unique(),
+
     // Telegram auth (optional if using email)
     telegramId: bigint('telegram_id', { mode: 'number' }).unique(),
     telegramUsername: varchar('telegram_username', { length: 255 }),
@@ -37,15 +40,17 @@ export const users = pgTable(
 
     // Profile
     name: varchar('name', { length: 255 }),
+    profilePhotoUrl: text('profile_photo_url'),
 
     // Auth provider tracking
-    authProvider: varchar('auth_provider', { length: 50 }).default('email').notNull(), // 'email' | 'telegram'
+    authProvider: varchar('auth_provider', { length: 50 }).default('google').notNull(), // 'google' | 'telegram'
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     emailIdx: uniqueIndex('users_email_idx').on(table.email),
+    googleIdIdx: uniqueIndex('users_google_id_idx').on(table.googleId),
     telegramIdIdx: uniqueIndex('users_telegram_id_idx').on(table.telegramId),
   })
 );

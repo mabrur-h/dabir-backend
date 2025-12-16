@@ -56,6 +56,9 @@ const envSchema = z.object({
   // Payment (Payme)
   PAYME_MERCHANT_ID: z.string().optional(),
   PAYME_SECRET_KEY: z.string().optional(),
+
+  // Google OAuth
+  GOOGLE_CLIENT_ID: z.string(),
 });
 
 const parseEnv = () => {
@@ -138,6 +141,10 @@ export const config = {
   payme: {
     merchantId: env.PAYME_MERCHANT_ID,
     secretKey: env.PAYME_SECRET_KEY,
+  },
+
+  google: {
+    clientId: env.GOOGLE_CLIENT_ID,
   },
 } as const;
 

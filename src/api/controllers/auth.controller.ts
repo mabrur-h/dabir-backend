@@ -41,6 +41,10 @@ export const linkTelegramSchema = z.object({
   username: z.string().optional(),
 });
 
+export const googleAuthSchema = z.object({
+  idToken: z.string().min(1, 'Google ID token is required'),
+});
+
 // ============================================
 // CONTROLLERS
 // ============================================
@@ -108,6 +112,33 @@ export async function telegramAuth(
   try {
     const input = telegramAuthSchema.parse(req.body);
     const result = await authService.authenticateWithTelegram(input);
+
+    res.status(result.isNewUser ? 201 : 200).json({
+      success: true,
+      data: {
+        user: result.user,
+        tokens: result.tokens,
+        isNewUser: result.isNewUser,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * POST /auth/google
+ * Authenticate with Google Sign-In
+ * Creates a new account if user doesn't exist
+ */
+export async function googleAuth(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const input = googleAuthSchema.parse(req.body);
+    const result = await authService.authenticateWithGoogle(input);
 
     res.status(result.isNewUser ? 201 : 200).json({
       success: true,

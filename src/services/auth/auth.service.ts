@@ -1,6 +1,7 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import { OAuth2Client } from 'google-auth-library';
 import { eq, and } from 'drizzle-orm';
 import { db, schema } from '../../db/index.js';
 import { config } from '../../config/index.js';
@@ -17,12 +18,16 @@ const logger = createLogger('auth-service');
 
 const SALT_ROUNDS = 12;
 
+// Google OAuth client
+const googleClient = new OAuth2Client(config.google.clientId);
+
 // Types
 export interface JwtPayload {
   userId: string;
   email?: string;
+  googleId?: string;
   telegramId?: number;
-  authProvider: 'email' | 'telegram';
+  authProvider: 'google' | 'telegram';
 }
 
 export interface AuthTokens {
@@ -40,6 +45,10 @@ export interface RegisterEmailInput {
 export interface LoginEmailInput {
   email: string;
   password: string;
+}
+
+export interface GoogleAuthInput {
+  idToken: string;
 }
 
 export interface TelegramAuthInput {
@@ -69,6 +78,7 @@ export interface TelegramWebAppAuthInput {
 export interface UserResponse {
   id: string;
   email: string | null;
+  googleId: string | null;
   telegramId: number | null;
   telegramUsername: string | null;
   telegramFirstName: string | null;
@@ -77,6 +87,7 @@ export interface UserResponse {
   telegramIsPremium: boolean | null;
   telegramPhotoUrl: string | null;
   name: string | null;
+  profilePhotoUrl: string | null;
   authProvider: string;
   createdAt: Date;
 }
@@ -143,14 +154,16 @@ async function saveRefreshToken(userId: string, token: string): Promise<void> {
 async function createTokens(user: {
   id: string;
   email: string | null;
+  googleId: string | null;
   telegramId: number | null;
   authProvider: string;
 }): Promise<AuthTokens> {
   const payload: JwtPayload = {
     userId: user.id,
     email: user.email ?? undefined,
+    googleId: user.googleId ?? undefined,
     telegramId: user.telegramId ?? undefined,
-    authProvider: user.authProvider as 'email' | 'telegram',
+    authProvider: user.authProvider as 'google' | 'telegram',
   };
 
   const accessToken = generateAccessToken(payload);
@@ -169,6 +182,7 @@ function formatUserResponse(user: typeof schema.users.$inferSelect): UserRespons
   return {
     id: user.id,
     email: user.email,
+    googleId: user.googleId,
     telegramId: user.telegramId,
     telegramUsername: user.telegramUsername,
     telegramFirstName: user.telegramFirstName,
@@ -177,6 +191,7 @@ function formatUserResponse(user: typeof schema.users.$inferSelect): UserRespons
     telegramIsPremium: user.telegramIsPremium,
     telegramPhotoUrl: user.telegramPhotoUrl,
     name: user.name,
+    profilePhotoUrl: user.profilePhotoUrl,
     authProvider: user.authProvider,
     createdAt: user.createdAt,
   };
@@ -271,6 +286,150 @@ export async function loginWithEmail(input: LoginEmailInput): Promise<{
   return {
     user: formatUserResponse(user),
     tokens,
+  };
+}
+
+// ============================================
+// GOOGLE AUTH
+// ============================================
+
+export async function authenticateWithGoogle(input: GoogleAuthInput): Promise<{
+  user: UserResponse;
+  tokens: AuthTokens;
+  isNewUser: boolean;
+}> {
+  const { idToken } = input;
+
+  // Verify the Google ID token
+  let payload;
+  try {
+    const ticket = await googleClient.verifyIdToken({
+      idToken,
+      audience: config.google.clientId,
+    });
+    payload = ticket.getPayload();
+  } catch (error) {
+    logger.error({ error }, 'Failed to verify Google ID token');
+    throw new UnauthorizedError('Invalid Google ID token', 'INVALID_GOOGLE_TOKEN');
+  }
+
+  if (!payload) {
+    throw new UnauthorizedError('Invalid Google ID token payload', 'INVALID_GOOGLE_TOKEN');
+  }
+
+  const { sub: googleId, email, name, picture } = payload;
+
+  if (!googleId) {
+    throw new UnauthorizedError('Google ID not found in token', 'INVALID_GOOGLE_TOKEN');
+  }
+
+  // Check if user exists by googleId
+  let user = await db.query.users.findFirst({
+    where: eq(schema.users.googleId, googleId),
+  });
+
+  let isNewUser = false;
+
+  if (!user) {
+    // Check if user exists by email (for account linking)
+    if (email) {
+      user = await db.query.users.findFirst({
+        where: eq(schema.users.email, email.toLowerCase()),
+      });
+
+      if (user) {
+        // Link Google to existing email account
+        const [updatedUser] = await db
+          .update(schema.users)
+          .set({
+            googleId,
+            profilePhotoUrl: picture ?? user.profilePhotoUrl,
+            authProvider: 'google',
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.users.id, user.id))
+          .returning();
+
+        if (updatedUser) {
+          user = updatedUser;
+        }
+
+        logger.info({ userId: user.id, googleId, email }, 'Google account linked to existing user');
+      }
+    }
+
+    if (!user) {
+      // Create new user
+      const [newUser] = await db
+        .insert(schema.users)
+        .values({
+          googleId,
+          email: email?.toLowerCase(),
+          name,
+          profilePhotoUrl: picture,
+          authProvider: 'google',
+        })
+        .returning();
+
+      if (!newUser) {
+        throw new Error('Failed to create user');
+      }
+
+      user = newUser;
+      isNewUser = true;
+
+      logger.info({ userId: user.id, googleId, email }, 'User registered with Google');
+
+      // Create free subscription for new user
+      try {
+        await subscriptionService.createFreeSubscription(user.id);
+        logger.info({ userId: user.id }, 'Free subscription created for new Google user');
+      } catch (error) {
+        logger.error({ userId: user.id, error }, 'Failed to create free subscription');
+      }
+    }
+  } else {
+    // Update user info if changed
+    const updates: Partial<typeof schema.users.$inferInsert> = {
+      updatedAt: new Date(),
+    };
+
+    let hasChanges = false;
+
+    if (name && user.name !== name) {
+      updates.name = name;
+      hasChanges = true;
+    }
+    if (picture && user.profilePhotoUrl !== picture) {
+      updates.profilePhotoUrl = picture;
+      hasChanges = true;
+    }
+    if (email && user.email !== email.toLowerCase()) {
+      updates.email = email.toLowerCase();
+      hasChanges = true;
+    }
+
+    if (hasChanges) {
+      const [updatedUser] = await db
+        .update(schema.users)
+        .set(updates)
+        .where(eq(schema.users.id, user.id))
+        .returning();
+
+      if (updatedUser) {
+        user = updatedUser;
+      }
+    }
+
+    logger.info({ userId: user.id, googleId, email }, 'User logged in with Google');
+  }
+
+  const tokens = await createTokens(user);
+
+  return {
+    user: formatUserResponse(user),
+    tokens,
+    isNewUser,
   };
 }
 

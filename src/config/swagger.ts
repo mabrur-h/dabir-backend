@@ -3,7 +3,7 @@ import type { OpenAPIV3 } from 'openapi-types';
 export const swaggerDocument: OpenAPIV3.Document = {
   openapi: '3.0.3',
   info: {
-    title: 'UzNotes-AI API',
+    title: 'Majlees-AI API',
     version: '1.0.0',
     description: `
 AI-powered voice notetaker backend that transcribes and summarizes audio/video lectures with excellent Uzbek language support using Gemini 2.5 Flash.

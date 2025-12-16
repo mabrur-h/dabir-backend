@@ -11,24 +11,15 @@ const router = Router();
 // ============================================
 
 /**
- * POST /api/v1/auth/register
- * Register a new user with email and password
+ * POST /api/v1/auth/google
+ * Authenticate with Google Sign-In
+ * Creates account if user doesn't exist
  * Rate limited: 10 attempts per 15 minutes per IP
  *
- * Body: { email: string, password: string, name?: string }
- * Response: { user, tokens: { accessToken, refreshToken, expiresIn } }
+ * Body: { idToken: string }
+ * Response: { user, tokens, isNewUser: boolean }
  */
-router.post('/register', authRateLimiter, authController.register);
-
-/**
- * POST /api/v1/auth/login
- * Login with email and password
- * Rate limited: 10 attempts per 15 minutes per IP
- *
- * Body: { email: string, password: string }
- * Response: { user, tokens: { accessToken, refreshToken, expiresIn } }
- */
-router.post('/login', authRateLimiter, authController.login);
+router.post('/google', authRateLimiter, authController.googleAuth);
 
 /**
  * POST /api/v1/auth/telegram

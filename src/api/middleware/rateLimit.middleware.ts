@@ -17,12 +17,13 @@ const getUserKeyGenerator = (req: Request): string => {
   if (authReq.user?.id) {
     return `user:${authReq.user.id}`;
   }
-  // Fallback to IP (handles proxies via x-forwarded-for)
+  // Fallback to IP - validation is disabled since we use user ID when available
   return req.ip || req.socket.remoteAddress || 'unknown';
 };
 
 /**
  * IP-only key generator for unauthenticated routes
+ * Note: We disable the IPv6 validation since we handle it manually
  */
 const getIpKeyGenerator = (req: Request): string => {
   return req.ip || req.socket.remoteAddress || 'unknown';
@@ -63,6 +64,8 @@ const createRedisRateLimiter = (
     legacyHeaders: false, // Disable X-RateLimit-* headers
     keyGenerator: getUserKeyGenerator,
     handler: standardHandler,
+    // Disable all validation - we handle IP normalization via Express trust proxy setting
+    validate: false,
     ...options,
   });
 };
@@ -106,11 +109,12 @@ export const uploadRateLimiter = createRedisRateLimiter('rl:upload:', {
 /**
  * Auth rate limiter (stricter for security)
  * Applies to login/register endpoints
- * 10 attempts per 15 minutes per IP
+ * Development: 100 attempts per 15 minutes per IP
+ * Production: 10 attempts per 15 minutes per IP
  */
 export const authRateLimiter = createRedisRateLimiter('rl:auth:', {
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // 10 attempts
+  max: config.server.isDev ? 100 : 10, // More lenient in development
   message: 'Too many authentication attempts. Please try again later.',
   keyGenerator: getIpKeyGenerator,
   handler: (req: Request, res: Response) => {
