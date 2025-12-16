@@ -96,6 +96,28 @@ steps:
     id: 'run-migrations'
     waitFor: ['push-api']
 
+  # Run database seed (subscription plans & minute packages)
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        gcloud run jobs deploy dabir-seed \
+          --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_API_SERVICE_NAME}:$COMMIT_SHA \
+          --region=${_REGION} \
+          --service-account=${_SERVICE_ACCOUNT} \
+          --add-cloudsql-instances=$PROJECT_ID:${_REGION}:${_DB_INSTANCE} \
+          --vpc-connector=${_VPC_CONNECTOR} \
+          --set-secrets=DATABASE_URL=DATABASE_URL:latest \
+          --command="node" \
+          --args="dist/db/seed.js" \
+          --max-retries=0 \
+          --task-timeout=300 \
+          --quiet
+        gcloud run jobs execute dabir-seed --region=${_REGION} --wait
+    id: 'run-seed'
+    waitFor: ['run-migrations']
+
   # Deploy API to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
@@ -131,7 +153,7 @@ steps:
       - '--set-secrets'
       - 'DATABASE_URL=DATABASE_URL:latest,REDIS_URL=REDIS_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,TELEGRAM_BOT_TOKEN=TELEGRAM_BOT_TOKEN:latest,TELEGRAM_WEBHOOK_SECRET=TELEGRAM_WEBHOOK_SECRET:latest,TELEGRAM_BOT_WEBHOOK_URL=TELEGRAM_BOT_WEBHOOK_URL:latest'
     id: 'deploy-api'
-    waitFor: ['run-migrations']
+    waitFor: ['run-seed']
 
   # Deploy Worker to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -168,7 +190,7 @@ steps:
       - '--set-secrets'
       - 'DATABASE_URL=DATABASE_URL:latest,REDIS_URL=REDIS_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,TELEGRAM_BOT_TOKEN=TELEGRAM_BOT_TOKEN:latest,TELEGRAM_WEBHOOK_SECRET=TELEGRAM_WEBHOOK_SECRET:latest,TELEGRAM_BOT_WEBHOOK_URL=TELEGRAM_BOT_WEBHOOK_URL:latest'
     id: 'deploy-worker'
-    waitFor: ['run-migrations']
+    waitFor: ['run-seed']
 
 images:
   - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_API_SERVICE_NAME}:$COMMIT_SHA'
