@@ -84,7 +84,7 @@ steps:
           --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_API_SERVICE_NAME}:$COMMIT_SHA \
           --region=${_REGION} \
           --service-account=${_SERVICE_ACCOUNT} \
-          --add-cloudsql-instances=$PROJECT_ID:${_REGION}:${_DB_INSTANCE} \
+          --set-cloudsql-instances=$PROJECT_ID:${_REGION}:${_DB_INSTANCE} \
           --vpc-connector=${_VPC_CONNECTOR} \
           --set-secrets=DATABASE_URL=DATABASE_URL:latest \
           --command="node" \
@@ -106,7 +106,7 @@ steps:
           --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_API_SERVICE_NAME}:$COMMIT_SHA \
           --region=${_REGION} \
           --service-account=${_SERVICE_ACCOUNT} \
-          --add-cloudsql-instances=$PROJECT_ID:${_REGION}:${_DB_INSTANCE} \
+          --set-cloudsql-instances=$PROJECT_ID:${_REGION}:${_DB_INSTANCE} \
           --vpc-connector=${_VPC_CONNECTOR} \
           --set-secrets=DATABASE_URL=DATABASE_URL:latest \
           --command="node" \
