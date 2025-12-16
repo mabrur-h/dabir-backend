@@ -57,8 +57,8 @@ const envSchema = z.object({
   PAYME_MERCHANT_ID: z.string().optional(),
   PAYME_SECRET_KEY: z.string().optional(),
 
-  // Google OAuth
-  GOOGLE_CLIENT_ID: z.string(),
+  // Google OAuth (optional for workers that don't handle auth)
+  GOOGLE_CLIENT_ID: z.string().optional(),
 });
 
 const parseEnv = () => {
