@@ -53,6 +53,42 @@ Access tokens expire after 15 minutes. Use the refresh token endpoint to get a n
       description: 'Lecture CRUD and content retrieval',
     },
     {
+      name: 'Lectures - Status',
+      description: 'Lecture processing status endpoints',
+    },
+    {
+      name: 'Lectures - Content',
+      description: 'Lecture content endpoints (transcript, summary, key points)',
+    },
+    {
+      name: 'Lectures - CustDev',
+      description: 'CustDev analysis endpoints for customer development interviews',
+    },
+    {
+      name: 'Lectures - Tags',
+      description: 'Manage tags assigned to lectures',
+    },
+    {
+      name: 'Lectures - Share',
+      description: 'Public sharing of lectures with user-friendly URLs',
+    },
+    {
+      name: 'Public',
+      description: 'Public endpoints that do not require authentication',
+    },
+    {
+      name: 'Folders',
+      description: 'Folder management for organizing lectures',
+    },
+    {
+      name: 'Tags',
+      description: 'Tag management for categorizing lectures',
+    },
+    {
+      name: 'Users',
+      description: 'User-related endpoints',
+    },
+    {
       name: 'Uploads',
       description: 'Resumable file uploads using tus.io protocol',
     },
@@ -103,6 +139,11 @@ Access tokens expire after 15 minutes. Use the refresh token endpoint to get a n
           name: { type: 'string', nullable: true },
           telegramId: { type: 'integer', nullable: true },
           telegramUsername: { type: 'string', nullable: true },
+          telegramFirstName: { type: 'string', nullable: true },
+          telegramLastName: { type: 'string', nullable: true },
+          telegramLanguageCode: { type: 'string', nullable: true, example: 'en' },
+          telegramIsPremium: { type: 'boolean', nullable: true },
+          telegramPhotoUrl: { type: 'string', nullable: true },
           authProvider: { type: 'string', enum: ['email', 'telegram'] },
           createdAt: { type: 'string', format: 'date-time' },
         },
@@ -238,6 +279,228 @@ Access tokens expire after 15 minutes. Use the refresh token endpoint to get a n
           description: { type: 'string' },
           timestampMs: { type: 'integer', example: 120000 },
           importance: { type: 'integer', minimum: 1, maximum: 5, example: 5 },
+        },
+      },
+
+      // Folder schemas
+      Folder: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          name: { type: 'string', example: 'Semester 1' },
+          color: { type: 'string', nullable: true, example: '#9B59B6' },
+          parentId: { type: 'string', format: 'uuid', nullable: true },
+          lectureCount: { type: 'integer', example: 12 },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      FolderWithChildren: {
+        allOf: [
+          { $ref: '#/components/schemas/Folder' },
+          {
+            type: 'object',
+            properties: {
+              children: {
+                type: 'array',
+                items: { $ref: '#/components/schemas/FolderWithChildren' },
+              },
+            },
+          },
+        ],
+      },
+
+      // Tag schemas
+      Tag: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          name: { type: 'string', example: 'Important' },
+          color: { type: 'string', nullable: true, example: '#FF5733' },
+          lectureCount: { type: 'integer', example: 8 },
+          createdAt: { type: 'string', format: 'date-time' },
+        },
+      },
+
+      // User statistics
+      UserStats: {
+        type: 'object',
+        properties: {
+          total: { type: 'integer', example: 25 },
+          completed: { type: 'integer', example: 20 },
+          processing: { type: 'integer', example: 3 },
+          failed: { type: 'integer', example: 2 },
+        },
+      },
+
+      // Lightweight status
+      LectureStatusLight: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          status: { type: 'string', example: 'transcribing' },
+          progress: { type: 'integer', minimum: 0, maximum: 100, example: 45 },
+          errorMessage: { type: 'string', nullable: true },
+        },
+      },
+
+      // CustDev schemas
+      CustDevCallSummary: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', example: 'Customer Interview - Acme Corp' },
+          overview: { type: 'string' },
+          customerMood: { type: 'string', example: 'Frustrated but hopeful' },
+        },
+      },
+      CustDevPainPoint: {
+        type: 'object',
+        properties: {
+          painPoint: { type: 'string', example: 'Slow onboarding process' },
+          impact: { type: 'string', example: 'Delays customer activation by 2 weeks' },
+          timestampMs: { type: 'integer', example: 180000 },
+        },
+      },
+      CustDevPositiveFeedback: {
+        type: 'object',
+        properties: {
+          feature: { type: 'string', example: 'Dashboard analytics' },
+          benefit: { type: 'string' },
+          timestampMs: { type: 'integer' },
+        },
+      },
+      CustDevProductSuggestion: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', example: 'Feature Request' },
+          priority: { type: 'string', example: 'High' },
+          description: { type: 'string' },
+          relatedPainPoint: { type: 'string' },
+        },
+      },
+      CustDevActionItem: {
+        type: 'object',
+        properties: {
+          owner: { type: 'string', example: 'Product' },
+          action: { type: 'string', example: 'Evaluate bulk import feasibility' },
+          timestampMs: { type: 'integer' },
+        },
+      },
+      CustDevMindMap: {
+        type: 'object',
+        properties: {
+          centralNode: {
+            type: 'object',
+            properties: {
+              label: { type: 'string' },
+              description: { type: 'string' },
+            },
+          },
+          branches: { type: 'object' },
+          connections: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                from: { type: 'string' },
+                to: { type: 'string' },
+                reason: { type: 'string' },
+              },
+            },
+          },
+        },
+      },
+      CustDevFull: {
+        type: 'object',
+        properties: {
+          callSummary: { $ref: '#/components/schemas/CustDevCallSummary' },
+          keyPainPoints: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/CustDevPainPoint' },
+          },
+          positiveFeedback: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/CustDevPositiveFeedback' },
+          },
+          productSuggestions: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/CustDevProductSuggestion' },
+          },
+          internalActionItems: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/CustDevActionItem' },
+          },
+          mindMap: { $ref: '#/components/schemas/CustDevMindMap' },
+        },
+      },
+
+      // Share schemas
+      LectureShare: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          lectureId: { type: 'string', format: 'uuid' },
+          slug: { type: 'string', example: 'intro-to-physics-abc123' },
+          isPublic: { type: 'boolean', example: true },
+          showTranscription: { type: 'boolean', example: true },
+          showSummary: { type: 'boolean', example: true },
+          showKeyPoints: { type: 'boolean', example: true },
+          viewCount: { type: 'integer', example: 42 },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      PublicLecture: {
+        type: 'object',
+        properties: {
+          slug: { type: 'string', example: 'intro-to-physics-abc123' },
+          title: { type: 'string', example: 'Introduction to Physics', nullable: true },
+          durationSeconds: { type: 'integer', nullable: true },
+          durationFormatted: { type: 'string', example: '45:30', nullable: true },
+          language: { type: 'string', example: 'uz' },
+          summarizationType: { type: 'string', example: 'lecture' },
+          createdAt: { type: 'string', format: 'date-time' },
+          ownerName: { type: 'string', nullable: true, example: 'John Doe' },
+          transcription: {
+            type: 'object',
+            nullable: true,
+            properties: {
+              fullText: { type: 'string' },
+              wordCount: { type: 'integer' },
+              segments: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    index: { type: 'integer' },
+                    startTimeMs: { type: 'integer' },
+                    endTimeMs: { type: 'integer' },
+                    startTimeFormatted: { type: 'string' },
+                    endTimeFormatted: { type: 'string' },
+                    text: { type: 'string' },
+                    speaker: { type: 'string', nullable: true },
+                  },
+                },
+              },
+            },
+          },
+          summary: {
+            type: 'object',
+            nullable: true,
+            properties: {
+              overview: { type: 'string' },
+              chapters: {
+                type: 'array',
+                nullable: true,
+                items: { $ref: '#/components/schemas/Chapter' },
+              },
+            },
+          },
+          keyPoints: {
+            type: 'array',
+            nullable: true,
+            items: { $ref: '#/components/schemas/KeyPoint' },
+          },
         },
       },
 
@@ -455,7 +718,7 @@ Access tokens expire after 15 minutes. Use the refresh token endpoint to get a n
         tags: ['Authentication'],
         summary: 'Authenticate with Telegram',
         description:
-          'Authenticate using Telegram ID. Creates a new account if user does not exist.',
+          'Authenticate using Telegram ID (for Telegram bot integration). Creates a new account if user does not exist. Use this endpoint when authenticating users from your Telegram bot.',
         requestBody: {
           required: true,
           content: {
@@ -468,6 +731,9 @@ Access tokens expire after 15 minutes. Use the refresh token endpoint to get a n
                   username: { type: 'string', example: 'johndoe' },
                   firstName: { type: 'string', example: 'John' },
                   lastName: { type: 'string', example: 'Doe' },
+                  languageCode: { type: 'string', example: 'en' },
+                  isPremium: { type: 'boolean', example: false },
+                  photoUrl: { type: 'string', format: 'uri', example: 'https://t.me/i/userpic/320/photo.jpg' },
                 },
               },
             },
@@ -475,7 +741,7 @@ Access tokens expire after 15 minutes. Use the refresh token endpoint to get a n
         },
         responses: {
           '200': {
-            description: 'Authentication successful',
+            description: 'Existing user authenticated',
             content: {
               'application/json': {
                 schema: {
@@ -487,7 +753,129 @@ Access tokens expire after 15 minutes. Use the refresh token endpoint to get a n
                       properties: {
                         user: { $ref: '#/components/schemas/User' },
                         tokens: { $ref: '#/components/schemas/Tokens' },
-                        isNewUser: { type: 'boolean' },
+                        isNewUser: { type: 'boolean', example: false },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '201': {
+            description: 'New user created and authenticated',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        user: { $ref: '#/components/schemas/User' },
+                        tokens: { $ref: '#/components/schemas/Tokens' },
+                        isNewUser: { type: 'boolean', example: true },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/api/v1/auth/telegram/webapp': {
+      post: {
+        tags: ['Authentication'],
+        summary: 'Authenticate with Telegram Mini App',
+        description: `
+Authenticate using Telegram Mini App (WebApp) init data. This is the secure authentication method
+that validates the cryptographic signature from Telegram. Creates a new account if user does not exist.
+
+**Required Headers:**
+- \`Authorization: tma <initDataRaw>\`
+
+The initDataRaw is the raw init data string from Telegram WebApp (\`window.Telegram.WebApp.initData\`).
+This data is cryptographically signed by Telegram and validated on the server using the bot token.
+
+**Init data expires after 1 hour.**
+        `,
+        parameters: [
+          {
+            name: 'Authorization',
+            in: 'header',
+            required: true,
+            schema: { type: 'string', example: 'tma query_id=AAHd...&user=%7B%22id%22%3A...' },
+            description: 'Telegram Mini App init data with "tma " prefix',
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Existing user authenticated',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        user: { $ref: '#/components/schemas/User' },
+                        tokens: { $ref: '#/components/schemas/Tokens' },
+                        isNewUser: { type: 'boolean', example: false },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '201': {
+            description: 'New user created and authenticated',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        user: { $ref: '#/components/schemas/User' },
+                        tokens: { $ref: '#/components/schemas/Tokens' },
+                        isNewUser: { type: 'boolean', example: true },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': {
+            description: 'Invalid or expired init data',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+                examples: {
+                  expired: {
+                    summary: 'Init data expired',
+                    value: {
+                      success: false,
+                      error: {
+                        code: 'INIT_DATA_EXPIRED',
+                        message: 'Telegram init data expired',
+                      },
+                    },
+                  },
+                  invalidSignature: {
+                    summary: 'Invalid signature',
+                    value: {
+                      success: false,
+                      error: {
+                        code: 'INVALID_SIGNATURE',
+                        message: 'Invalid Telegram init data signature',
                       },
                     },
                   },
@@ -729,6 +1117,12 @@ Access tokens expire after 15 minutes. Use the refresh token endpoint to get a n
             schema: { type: 'string' },
             description: 'Search by title',
           },
+          {
+            name: 'fields',
+            in: 'query',
+            schema: { type: 'string', enum: ['minimal', 'full'], default: 'full' },
+            description: 'Response fields: minimal (less data) or full (all fields)',
+          },
         ],
         responses: {
           '200': {
@@ -857,8 +1251,14 @@ Access tokens expire after 15 minutes. Use the refresh token endpoint to get a n
               schema: {
                 type: 'object',
                 properties: {
-                  title: { type: 'string' },
-                  language: { type: 'string' },
+                  title: { type: 'string', description: 'Lecture title (max 500 chars)' },
+                  language: { type: 'string', enum: ['uz', 'ru', 'en'], description: 'Language code' },
+                  folderId: {
+                    type: 'string',
+                    format: 'uuid',
+                    nullable: true,
+                    description: 'Folder ID to move lecture to, or null to remove from folder',
+                  },
                 },
               },
             },
@@ -1001,8 +1401,8 @@ Access tokens expire after 15 minutes. Use the refresh token endpoint to get a n
     },
     '/api/v1/lectures/{id}/summary': {
       get: {
-        tags: ['Lectures'],
-        summary: 'Get summary',
+        tags: ['Lectures - Content'],
+        summary: 'Get summary with key points',
         description: 'Get lecture summary with chapters and key points',
         security: [{ bearerAuth: [] }],
         parameters: [
@@ -1039,6 +1439,1506 @@ Access tokens expire after 15 minutes. Use the refresh token endpoint to get a n
           },
           '401': { $ref: '#/components/responses/UnauthorizedError' },
           '404': { $ref: '#/components/responses/NotFoundError' },
+        },
+      },
+    },
+
+    // Batch status endpoint
+    '/api/v1/lectures/status': {
+      post: {
+        tags: ['Lectures - Status'],
+        summary: 'Batch status check',
+        description: 'Check status of multiple lectures in a single request',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['ids'],
+                properties: {
+                  ids: {
+                    type: 'array',
+                    items: { type: 'string', format: 'uuid' },
+                    maxItems: 50,
+                    description: 'Array of lecture UUIDs (max 50)',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Batch status response',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        statuses: {
+                          type: 'object',
+                          additionalProperties: { $ref: '#/components/schemas/LectureStatusLight' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+        },
+      },
+    },
+
+    // Lightweight status endpoint
+    '/api/v1/lectures/{id}/status/light': {
+      get: {
+        tags: ['Lectures - Status'],
+        summary: 'Get lightweight status',
+        description: 'Get lightweight status for efficient polling. Recommended for polling.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Lightweight status (~100 bytes)',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: { $ref: '#/components/schemas/LectureStatusLight' },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+          '404': { $ref: '#/components/responses/NotFoundError' },
+        },
+      },
+    },
+
+    // Paginated transcript endpoint
+    '/api/v1/lectures/{id}/transcript': {
+      get: {
+        tags: ['Lectures - Content'],
+        summary: 'Get transcript (paginated)',
+        description: 'Get transcription with optional pagination for segments',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+          {
+            name: 'page',
+            in: 'query',
+            schema: { type: 'integer', minimum: 1 },
+            description: 'Page number (enables pagination)',
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+            description: 'Segments per page (max: 100)',
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Transcription data',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        transcription: {
+                          type: 'object',
+                          properties: {
+                            fullText: { type: 'string' },
+                            wordCount: { type: 'integer' },
+                            segments: {
+                              type: 'array',
+                              items: { $ref: '#/components/schemas/TranscriptionSegment' },
+                            },
+                            pagination: { $ref: '#/components/schemas/Pagination' },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+          '404': { $ref: '#/components/responses/NotFoundError' },
+        },
+      },
+    },
+
+    // Summary only endpoint
+    '/api/v1/lectures/{id}/summary-only': {
+      get: {
+        tags: ['Lectures - Content'],
+        summary: 'Get summary only',
+        description: 'Get summary without key points (smaller payload)',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Summary data (without key points)',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        summary: { $ref: '#/components/schemas/Summary' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+          '404': { $ref: '#/components/responses/NotFoundError' },
+        },
+      },
+    },
+
+    // Key points only endpoint
+    '/api/v1/lectures/{id}/keypoints': {
+      get: {
+        tags: ['Lectures - Content'],
+        summary: 'Get key points only',
+        description: 'Get key points array only',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Key points data',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        keyPoints: {
+                          type: 'array',
+                          items: { $ref: '#/components/schemas/KeyPoint' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+          '404': { $ref: '#/components/responses/NotFoundError' },
+        },
+      },
+    },
+
+    // CustDev endpoints
+    '/api/v1/lectures/{id}/custdev': {
+      get: {
+        tags: ['Lectures - CustDev'],
+        summary: 'Get full CustDev data',
+        description: 'Get all CustDev analysis data. Only available for lectures with summarizationType: "custdev"',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Full CustDev analysis',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: { $ref: '#/components/schemas/CustDevFull' },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+          '404': { $ref: '#/components/responses/NotFoundError' },
+        },
+      },
+    },
+    '/api/v1/lectures/{id}/custdev/mindmap': {
+      get: {
+        tags: ['Lectures - CustDev'],
+        summary: 'Get CustDev mind map',
+        description: 'Get only the mind map visualization data',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Mind map data',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        mindMap: { $ref: '#/components/schemas/CustDevMindMap' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+          '404': { $ref: '#/components/responses/NotFoundError' },
+        },
+      },
+    },
+    '/api/v1/lectures/{id}/custdev/painpoints': {
+      get: {
+        tags: ['Lectures - CustDev'],
+        summary: 'Get CustDev pain points',
+        description: 'Get only the pain points array',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Pain points data',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        keyPainPoints: {
+                          type: 'array',
+                          items: { $ref: '#/components/schemas/CustDevPainPoint' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+          '404': { $ref: '#/components/responses/NotFoundError' },
+        },
+      },
+    },
+    '/api/v1/lectures/{id}/custdev/suggestions': {
+      get: {
+        tags: ['Lectures - CustDev'],
+        summary: 'Get CustDev suggestions',
+        description: 'Get only the product suggestions array',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Product suggestions data',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        productSuggestions: {
+                          type: 'array',
+                          items: { $ref: '#/components/schemas/CustDevProductSuggestion' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+          '404': { $ref: '#/components/responses/NotFoundError' },
+        },
+      },
+    },
+    '/api/v1/lectures/{id}/custdev/actions': {
+      get: {
+        tags: ['Lectures - CustDev'],
+        summary: 'Get CustDev action items',
+        description: 'Get only the internal action items array',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Action items data',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        internalActionItems: {
+                          type: 'array',
+                          items: { $ref: '#/components/schemas/CustDevActionItem' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+          '404': { $ref: '#/components/responses/NotFoundError' },
+        },
+      },
+    },
+
+    // Lecture Tags endpoints
+    '/api/v1/lectures/{lectureId}/tags': {
+      get: {
+        tags: ['Lectures - Tags'],
+        summary: 'Get lecture tags',
+        description: 'Get all tags assigned to a lecture',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'lectureId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Lecture tags',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        tags: {
+                          type: 'array',
+                          items: { $ref: '#/components/schemas/Tag' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+          '404': { $ref: '#/components/responses/NotFoundError' },
+        },
+      },
+      put: {
+        tags: ['Lectures - Tags'],
+        summary: 'Set lecture tags',
+        description: 'Replace all tags on a lecture with the specified tags',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'lectureId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['tagIds'],
+                properties: {
+                  tagIds: {
+                    type: 'array',
+                    items: { type: 'string', format: 'uuid' },
+                    description: 'Array of tag UUIDs to assign (can be empty to remove all)',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Updated lecture tags',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        tags: {
+                          type: 'array',
+                          items: { $ref: '#/components/schemas/Tag' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+          '404': { $ref: '#/components/responses/NotFoundError' },
+        },
+      },
+    },
+    '/api/v1/lectures/{lectureId}/tags/{tagId}': {
+      post: {
+        tags: ['Lectures - Tags'],
+        summary: 'Add tag to lecture',
+        description: 'Add a single tag to a lecture. If already assigned, succeeds silently.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'lectureId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+          {
+            name: 'tagId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Tag added',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        message: { type: 'string', example: 'Tag added to lecture' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+          '404': { $ref: '#/components/responses/NotFoundError' },
+        },
+      },
+      delete: {
+        tags: ['Lectures - Tags'],
+        summary: 'Remove tag from lecture',
+        description: 'Remove a single tag from a lecture',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'lectureId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+          {
+            name: 'tagId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Tag removed',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        message: { type: 'string', example: 'Tag removed from lecture' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+          '404': { $ref: '#/components/responses/NotFoundError' },
+        },
+      },
+    },
+
+    // Lecture Share endpoints
+    '/api/v1/lectures/{id}/share': {
+      post: {
+        tags: ['Lectures - Share'],
+        summary: 'Create share link',
+        description: `
+Create a public share link for a lecture. Only completed lectures can be shared.
+
+The share URL will be \`/api/v1/s/{slug}\` where slug is either auto-generated from the title or custom-provided.
+
+**Example auto-generated slugs:**
+- "Introduction to Physics" → "introduction-to-physics-abc123"
+- "Машинное обучение 101" → "mashinnoe-obuchenie-101-xyz789"
+        `,
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  customSlug: {
+                    type: 'string',
+                    minLength: 3,
+                    maxLength: 100,
+                    example: 'my-physics-lecture',
+                    description: 'Custom URL slug (optional). If not provided, auto-generated from title.',
+                  },
+                  showTranscription: {
+                    type: 'boolean',
+                    default: true,
+                    description: 'Include transcription in public view',
+                  },
+                  showSummary: {
+                    type: 'boolean',
+                    default: true,
+                    description: 'Include summary in public view',
+                  },
+                  showKeyPoints: {
+                    type: 'boolean',
+                    default: true,
+                    description: 'Include key points in public view',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Share link created',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        share: { $ref: '#/components/schemas/LectureShare' },
+                        shareUrl: { type: 'string', example: '/s/intro-to-physics-abc123' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '400': {
+            description: 'Lecture not completed yet',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+                example: {
+                  success: false,
+                  error: {
+                    code: 'LECTURE_NOT_COMPLETED',
+                    message: 'Only completed lectures can be shared publicly',
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+          '404': { $ref: '#/components/responses/NotFoundError' },
+          '409': {
+            description: 'Share already exists or custom slug taken',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+        },
+      },
+      get: {
+        tags: ['Lectures - Share'],
+        summary: 'Get share settings',
+        description: 'Get the current share settings for a lecture. Returns null if not shared.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Share settings',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        share: {
+                          allOf: [{ $ref: '#/components/schemas/LectureShare' }],
+                          nullable: true,
+                        },
+                        shareUrl: { type: 'string', nullable: true, example: '/s/intro-to-physics-abc123' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+          '404': { $ref: '#/components/responses/NotFoundError' },
+        },
+      },
+      patch: {
+        tags: ['Lectures - Share'],
+        summary: 'Update share settings',
+        description: 'Update visibility settings for a shared lecture.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  isPublic: {
+                    type: 'boolean',
+                    description: 'Toggle public visibility (false to temporarily hide)',
+                  },
+                  showTranscription: { type: 'boolean' },
+                  showSummary: { type: 'boolean' },
+                  showKeyPoints: { type: 'boolean' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Share settings updated',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        share: { $ref: '#/components/schemas/LectureShare' },
+                        shareUrl: { type: 'string', example: '/s/intro-to-physics-abc123' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+          '404': { $ref: '#/components/responses/NotFoundError' },
+        },
+      },
+      delete: {
+        tags: ['Lectures - Share'],
+        summary: 'Revoke share link',
+        description: 'Delete the share link and make the lecture private again.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Share link revoked',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        message: { type: 'string', example: 'Share link has been revoked' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+          '404': { $ref: '#/components/responses/NotFoundError' },
+        },
+      },
+    },
+
+    // Share utility endpoints
+    '/api/v1/shares/check-slug': {
+      post: {
+        tags: ['Lectures - Share'],
+        summary: 'Check slug availability',
+        description: 'Check if a custom slug is available for use.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['slug'],
+                properties: {
+                  slug: {
+                    type: 'string',
+                    minLength: 1,
+                    maxLength: 100,
+                    example: 'my-custom-slug',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Slug availability status',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        slug: { type: 'string', example: 'my-custom-slug' },
+                        available: { type: 'boolean', example: true },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+        },
+      },
+    },
+
+    // Public share access (no auth required)
+    '/api/v1/s/{slug}': {
+      get: {
+        tags: ['Public'],
+        summary: 'Get shared lecture',
+        description: `
+Get a publicly shared lecture by its slug. **No authentication required.**
+
+The response includes only the content that the owner has enabled for public viewing.
+View count is automatically incremented.
+        `,
+        parameters: [
+          {
+            name: 'slug',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', minLength: 3, maxLength: 255 },
+            example: 'intro-to-physics-abc123',
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Public lecture data',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: { $ref: '#/components/schemas/PublicLecture' },
+                  },
+                },
+              },
+            },
+          },
+          '404': {
+            description: 'Share not found or no longer public',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+                example: {
+                  success: false,
+                  error: {
+                    code: 'SHARE_NOT_FOUND',
+                    message: 'Shared lecture not found or is no longer public',
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+
+    // Folder endpoints
+    '/api/v1/folders': {
+      get: {
+        tags: ['Folders'],
+        summary: 'List folders',
+        description: 'Get all folders as a flat list',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'List of folders',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        folders: {
+                          type: 'array',
+                          items: { $ref: '#/components/schemas/Folder' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+        },
+      },
+      post: {
+        tags: ['Folders'],
+        summary: 'Create folder',
+        description: 'Create a new folder',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['name'],
+                properties: {
+                  name: { type: 'string', minLength: 1, maxLength: 255, example: 'Semester 1' },
+                  color: { type: 'string', pattern: '^#[0-9A-Fa-f]{6}$', example: '#9B59B6' },
+                  parentId: {
+                    type: 'string',
+                    format: 'uuid',
+                    description: 'Parent folder ID for nesting',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Folder created',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        folder: { $ref: '#/components/schemas/Folder' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+          '404': { $ref: '#/components/responses/NotFoundError' },
+          '409': {
+            description: 'Folder with this name already exists',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/api/v1/folders/tree': {
+      get: {
+        tags: ['Folders'],
+        summary: 'List folders (tree)',
+        description: 'Get folders as a nested tree structure',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'Folder tree',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        folders: {
+                          type: 'array',
+                          items: { $ref: '#/components/schemas/FolderWithChildren' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+        },
+      },
+    },
+    '/api/v1/folders/{id}': {
+      get: {
+        tags: ['Folders'],
+        summary: 'Get folder',
+        description: 'Get a folder by ID with lecture count',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Folder details',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        folder: { $ref: '#/components/schemas/Folder' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+          '404': { $ref: '#/components/responses/NotFoundError' },
+        },
+      },
+      patch: {
+        tags: ['Folders'],
+        summary: 'Update folder',
+        description: 'Update folder name, color, or parent',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string', minLength: 1, maxLength: 255 },
+                  color: { type: 'string', pattern: '^#[0-9A-Fa-f]{6}$', nullable: true },
+                  parentId: {
+                    type: 'string',
+                    format: 'uuid',
+                    nullable: true,
+                    description: 'New parent folder ID, or null for root',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Folder updated',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        folder: { $ref: '#/components/schemas/Folder' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+          '404': { $ref: '#/components/responses/NotFoundError' },
+          '409': {
+            description: 'Conflict (name exists or circular reference)',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+        },
+      },
+      delete: {
+        tags: ['Folders'],
+        summary: 'Delete folder',
+        description:
+          'Delete a folder. Child folders move to parent (or root). Lectures have folderId set to null.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Folder deleted',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        message: { type: 'string', example: 'Folder deleted successfully' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+          '404': { $ref: '#/components/responses/NotFoundError' },
+        },
+      },
+    },
+
+    // Tag endpoints
+    '/api/v1/tags': {
+      get: {
+        tags: ['Tags'],
+        summary: 'List tags',
+        description: 'Get all tags for the user',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'counts',
+            in: 'query',
+            schema: { type: 'boolean', default: false },
+            description: 'Include lecture counts per tag',
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'List of tags',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        tags: {
+                          type: 'array',
+                          items: { $ref: '#/components/schemas/Tag' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+        },
+      },
+      post: {
+        tags: ['Tags'],
+        summary: 'Create tag',
+        description: 'Create a new tag',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['name'],
+                properties: {
+                  name: { type: 'string', minLength: 1, maxLength: 100, example: 'Important' },
+                  color: { type: 'string', pattern: '^#[0-9A-Fa-f]{6}$', example: '#FF5733' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Tag created',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        tag: { $ref: '#/components/schemas/Tag' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+          '409': {
+            description: 'Tag with this name already exists',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/api/v1/tags/{id}': {
+      get: {
+        tags: ['Tags'],
+        summary: 'Get tag',
+        description: 'Get a tag by ID',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Tag details',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        tag: { $ref: '#/components/schemas/Tag' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+          '404': { $ref: '#/components/responses/NotFoundError' },
+        },
+      },
+      patch: {
+        tags: ['Tags'],
+        summary: 'Update tag',
+        description: 'Update tag name or color',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string', minLength: 1, maxLength: 100 },
+                  color: { type: 'string', pattern: '^#[0-9A-Fa-f]{6}$', nullable: true },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Tag updated',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        tag: { $ref: '#/components/schemas/Tag' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+          '404': { $ref: '#/components/responses/NotFoundError' },
+          '409': {
+            description: 'Tag with this name already exists',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+        },
+      },
+      delete: {
+        tags: ['Tags'],
+        summary: 'Delete tag',
+        description: 'Delete a tag. The tag is automatically removed from all lectures.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Tag deleted',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        message: { type: 'string', example: 'Tag deleted successfully' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
+          '404': { $ref: '#/components/responses/NotFoundError' },
+        },
+      },
+    },
+
+    // Users endpoints
+    '/api/v1/users/stats': {
+      get: {
+        tags: ['Users'],
+        summary: 'Get user statistics',
+        description: "Get statistics about the authenticated user's lectures",
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'User statistics',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: { $ref: '#/components/schemas/UserStats' },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/UnauthorizedError' },
         },
       },
     },

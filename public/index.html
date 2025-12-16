@@ -1,0 +1,1094 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>UzNotes-AI - Backend Test UI</title>
+  <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4.1.0/dist/tus.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+    h1 { color: #60a5fa; margin-bottom: 20px; }
+    h2 { color: #94a3b8; margin: 20px 0 10px; font-size: 1.1rem; }
+
+    .card {
+      background: #1e293b;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
+
+    input, select, button, textarea {
+      padding: 10px 15px;
+      border-radius: 6px;
+      border: 1px solid #334155;
+      background: #0f172a;
+      color: #e2e8f0;
+      font-size: 14px;
+      width: 100%;
+      margin-bottom: 10px;
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: #60a5fa;
+    }
+
+    button {
+      background: #3b82f6;
+      border: none;
+      cursor: pointer;
+      font-weight: 500;
+      transition: background 0.2s;
+    }
+    button:hover { background: #2563eb; }
+    button:disabled { background: #475569; cursor: not-allowed; }
+    button.secondary { background: #475569; }
+    button.secondary:hover { background: #64748b; }
+    button.danger { background: #ef4444; }
+    button.danger:hover { background: #dc2626; }
+
+    .row { display: flex; gap: 10px; }
+    .row input { flex: 1; }
+    .row button { width: auto; }
+
+    .status {
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 500;
+      display: inline-block;
+    }
+    .status.uploaded { background: #1d4ed8; }
+    .status.extracting, .status.transcribing, .status.summarizing { background: #d97706; }
+    .status.completed { background: #059669; }
+    .status.failed { background: #dc2626; }
+
+    .progress-bar {
+      height: 8px;
+      background: #334155;
+      border-radius: 4px;
+      overflow: hidden;
+      margin: 10px 0;
+    }
+    .progress-bar .fill {
+      height: 100%;
+      background: #3b82f6;
+      transition: width 0.3s;
+    }
+
+    .lecture-item {
+      background: #0f172a;
+      padding: 15px;
+      border-radius: 6px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .lecture-item:hover { background: #1a2744; }
+    .lecture-item.selected { border: 2px solid #3b82f6; }
+    .lecture-item h3 { font-size: 14px; margin-bottom: 5px; }
+    .lecture-item .meta { font-size: 12px; color: #64748b; }
+
+    .log {
+      background: #0f172a;
+      border-radius: 6px;
+      padding: 15px;
+      font-family: monospace;
+      font-size: 12px;
+      max-height: 200px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .log .error { color: #f87171; }
+    .log .success { color: #4ade80; }
+    .log .info { color: #60a5fa; }
+
+    .tabs {
+      display: flex;
+      gap: 5px;
+      margin-bottom: 15px;
+    }
+    .tab {
+      padding: 8px 16px;
+      background: transparent;
+      border: 1px solid #334155;
+      color: #94a3b8;
+      cursor: pointer;
+      width: auto;
+    }
+    .tab.active { background: #3b82f6; border-color: #3b82f6; color: white; }
+
+    .content-box {
+      background: #0f172a;
+      border-radius: 6px;
+      padding: 15px;
+      max-height: 400px;
+      overflow-y: auto;
+      line-height: 1.6;
+    }
+    .content-box h4 { color: #60a5fa; margin: 15px 0 10px; }
+    .content-box h4:first-child { margin-top: 0; }
+
+    .segment {
+      padding: 10px;
+      background: #1e293b;
+      border-radius: 4px;
+      margin-bottom: 8px;
+    }
+    .segment .time { color: #60a5fa; font-size: 12px; font-weight: 500; }
+    .segment .text { margin-top: 5px; }
+
+    .key-point {
+      padding: 10px;
+      background: #1e293b;
+      border-radius: 4px;
+      margin-bottom: 8px;
+      border-left: 3px solid #3b82f6;
+    }
+    .key-point .title { font-weight: 600; margin-bottom: 5px; }
+    .key-point .importance { font-size: 12px; color: #fbbf24; }
+
+    .hidden { display: none; }
+
+    #authStatus {
+      padding: 10px;
+      border-radius: 6px;
+      margin-bottom: 15px;
+      font-size: 13px;
+    }
+    #authStatus.logged-in { background: #064e3b; }
+    #authStatus.logged-out { background: #7f1d1d; }
+
+    .file-drop {
+      border: 2px dashed #334155;
+      border-radius: 8px;
+      padding: 40px;
+      text-align: center;
+      transition: all 0.2s;
+    }
+    .file-drop.dragover { border-color: #3b82f6; background: #1e293b; }
+    .file-drop input { display: none; }
+    .file-drop label {
+      cursor: pointer;
+      color: #60a5fa;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Majlees - AI Backend Test UI</h1>
+
+    <!-- Auth Section -->
+    <div class="card">
+      <h2>Authentication</h2>
+      <div id="authStatus" class="logged-out">Not logged in</div>
+
+      <div id="loginForm">
+        <div class="row">
+          <input type="email" id="email" placeholder="Email" value="test@example.com">
+          <input type="password" id="password" placeholder="Password" value="password123">
+        </div>
+        <div class="row">
+          <button onclick="login()">Login</button>
+          <button onclick="register()" class="secondary">Register</button>
+        </div>
+      </div>
+
+      <div id="loggedInInfo" class="hidden">
+        <p style="margin-bottom:10px">Logged in as: <strong id="userEmail"></strong></p>
+        <button onclick="logout()" class="danger" style="width:auto">Logout</button>
+      </div>
+    </div>
+
+    <div class="grid">
+      <!-- Upload Section -->
+      <div class="card">
+        <h2>Upload Lecture</h2>
+
+        <div class="file-drop" id="dropZone">
+          <p>Drag & drop a file here or <label for="fileInput">browse</label></p>
+          <input type="file" id="fileInput" accept="video/*,audio/*">
+          <p style="margin-top:10px; font-size:12px; color:#64748b">
+            Supports: MP4, MP3, WAV, WebM, etc.
+          </p>
+        </div>
+
+        <div style="margin-top:15px">
+          <input type="text" id="lectureTitle" placeholder="Lecture Title (optional)">
+          <select id="lectureLanguage">
+            <option value="uz">Uzbek</option>
+            <option value="ru">Russian</option>
+            <option value="en">English</option>
+          </select>
+          <select id="summarizationType">
+            <option value="lecture">📚 Lecture Summary</option>
+            <option value="custdev">💼 CustDev Analysis</option>
+          </select>
+        </div>
+
+        <div id="uploadProgress" class="hidden">
+          <p id="uploadFileName" style="font-size:13px; margin-bottom:5px"></p>
+          <div class="progress-bar"><div class="fill" id="uploadProgressFill" style="width:0%"></div></div>
+          <p id="uploadProgressText" style="font-size:12px; color:#64748b">0%</p>
+        </div>
+
+        <button onclick="startUpload()" id="uploadBtn" disabled>Upload</button>
+        <button onclick="cancelUpload()" id="cancelBtn" class="danger hidden">Cancel Upload</button>
+
+        <h2>Upload Log</h2>
+        <div class="log" id="uploadLog"></div>
+      </div>
+
+      <!-- Lectures List -->
+      <div class="card">
+        <h2>My Lectures</h2>
+        <div class="row" style="margin-bottom:15px">
+          <select id="statusFilter">
+            <option value="">All Statuses</option>
+            <option value="uploaded">Uploaded</option>
+            <option value="extracting">Extracting</option>
+            <option value="transcribing">Transcribing</option>
+            <option value="summarizing">Summarizing</option>
+            <option value="completed">Completed</option>
+            <option value="failed">Failed</option>
+          </select>
+          <button onclick="loadLectures()" style="width:auto">Refresh</button>
+        </div>
+
+        <div id="lecturesList"></div>
+        <div id="pagination" style="margin-top:15px; text-align:center"></div>
+      </div>
+    </div>
+
+    <!-- Lecture Details -->
+    <div class="card" id="lectureDetails" class="hidden">
+      <h2>Lecture Details</h2>
+      <div id="lectureInfo"></div>
+
+      <div class="tabs" style="margin-top:20px" id="lectureTabs">
+        <button class="tab active" onclick="showTab('transcription')">Transcription</button>
+        <button class="tab" onclick="showTab('summary')">Summary</button>
+        <button class="tab" onclick="showTab('keypoints')">Key Points</button>
+      </div>
+
+      <!-- CustDev specific tabs (hidden by default) -->
+      <div class="tabs hidden" style="margin-top:20px" id="custdevTabs">
+        <button class="tab active" onclick="showTab('transcription')">Transcription</button>
+        <button class="tab" onclick="showTab('custdevSummary')">Call Summary</button>
+        <button class="tab" onclick="showTab('mindmap')">Mind Map</button>
+        <button class="tab" onclick="showTab('painpoints')">Pain Points</button>
+        <button class="tab" onclick="showTab('suggestions')">Suggestions</button>
+        <button class="tab" onclick="showTab('actions')">Action Items</button>
+      </div>
+
+      <div id="tabContent">
+        <div id="transcriptionTab" class="content-box">
+          <p style="color:#64748b">Select a completed lecture to view transcription</p>
+        </div>
+        <div id="summaryTab" class="content-box hidden">
+          <p style="color:#64748b">Select a completed lecture to view summary</p>
+        </div>
+        <div id="keypointsTab" class="content-box hidden">
+          <p style="color:#64748b">Select a completed lecture to view key points</p>
+        </div>
+        <!-- CustDev specific tabs -->
+        <div id="custdevSummaryTab" class="content-box hidden">
+          <p style="color:#64748b">Select a completed CustDev recording to view call summary</p>
+        </div>
+        <div id="painpointsTab" class="content-box hidden">
+          <p style="color:#64748b">Select a completed CustDev recording to view pain points</p>
+        </div>
+        <div id="suggestionsTab" class="content-box hidden">
+          <p style="color:#64748b">Select a completed CustDev recording to view suggestions</p>
+        </div>
+        <div id="actionsTab" class="content-box hidden">
+          <p style="color:#64748b">Select a completed CustDev recording to view action items</p>
+        </div>
+        <div id="mindmapTab" class="content-box hidden">
+          <p style="color:#64748b">Select a completed CustDev recording to view mind map</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- API Config -->
+    <div class="card">
+      <h2>API Configuration</h2>
+      <div class="row">
+        <input type="text" id="apiUrl" value="http://localhost:3000" placeholder="API Base URL">
+        <button onclick="testConnection()" style="width:auto">Test Connection</button>
+      </div>
+      <div class="log" id="apiLog" style="margin-top:10px"></div>
+    </div>
+  </div>
+
+  <script>
+    // State
+    let accessToken = localStorage.getItem('accessToken') || '';
+    let refreshToken = localStorage.getItem('refreshToken') || '';
+    let currentUpload = null;
+    let selectedFile = null;
+    let selectedLectureId = null;
+    let pollingInterval = null;
+
+    // DOM Elements
+    const $ = id => document.getElementById(id);
+    const apiUrl = () => $('apiUrl').value.replace(/\/$/, '');
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', () => {
+      updateAuthUI();
+      setupDropZone();
+      if (accessToken) loadLectures();
+    });
+
+    // =====================
+    // AUTH FUNCTIONS
+    // =====================
+
+    function updateAuthUI() {
+      const status = $('authStatus');
+      const loginForm = $('loginForm');
+      const loggedInInfo = $('loggedInInfo');
+
+      if (accessToken) {
+        status.className = 'logged-in';
+        status.textContent = 'Logged in';
+        loginForm.classList.add('hidden');
+        loggedInInfo.classList.remove('hidden');
+        fetchMe();
+      } else {
+        status.className = 'logged-out';
+        status.textContent = 'Not logged in';
+        loginForm.classList.remove('hidden');
+        loggedInInfo.classList.add('hidden');
+      }
+    }
+
+    async function fetchMe() {
+      try {
+        const res = await apiCall('/api/v1/auth/me');
+        if (res.success) {
+          $('userEmail').textContent = res.data.user.email;
+        }
+      } catch (e) {
+        console.error('Failed to fetch user info:', e);
+      }
+    }
+
+    async function login() {
+      const email = $('email').value;
+      const password = $('password').value;
+
+      try {
+        const res = await fetch(`${apiUrl()}/api/v1/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          accessToken = data.data.tokens.accessToken;
+          refreshToken = data.data.tokens.refreshToken;
+          localStorage.setItem('accessToken', accessToken);
+          localStorage.setItem('refreshToken', refreshToken);
+          updateAuthUI();
+          loadLectures();
+          log('apiLog', 'Login successful', 'success');
+        } else {
+          log('apiLog', `Login failed: ${data.error?.message || 'Unknown error'}`, 'error');
+        }
+      } catch (e) {
+        log('apiLog', `Login error: ${e.message}`, 'error');
+      }
+    }
+
+    async function register() {
+      const email = $('email').value;
+      const password = $('password').value;
+
+      try {
+        const res = await fetch(`${apiUrl()}/api/v1/auth/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          accessToken = data.data.tokens.accessToken;
+          refreshToken = data.data.tokens.refreshToken;
+          localStorage.setItem('accessToken', accessToken);
+          localStorage.setItem('refreshToken', refreshToken);
+          updateAuthUI();
+          loadLectures();
+          log('apiLog', 'Registration successful', 'success');
+        } else {
+          log('apiLog', `Registration failed: ${data.error?.message || 'Unknown error'}`, 'error');
+        }
+      } catch (e) {
+        log('apiLog', `Registration error: ${e.message}`, 'error');
+      }
+    }
+
+    function logout() {
+      accessToken = '';
+      refreshToken = '';
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
+      updateAuthUI();
+      $('lecturesList').innerHTML = '';
+      log('apiLog', 'Logged out', 'info');
+    }
+
+    // =====================
+    // API HELPER
+    // =====================
+
+    async function apiCall(path, options = {}) {
+      const res = await fetch(`${apiUrl()}${path}`, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(accessToken ? { 'Authorization': `Bearer ${accessToken}` } : {}),
+          ...options.headers
+        }
+      });
+      return res.json();
+    }
+
+    async function testConnection() {
+      try {
+        const res = await fetch(`${apiUrl()}/health`);
+        if (res.ok) {
+          const data = await res.json();
+          log('apiLog', `Connected to ${apiUrl()} - Status: ${data.status || 'OK'}`, 'success');
+        } else {
+          log('apiLog', `Server responded with ${res.status}`, 'error');
+        }
+      } catch (e) {
+        log('apiLog', `Connection failed: ${e.message}`, 'error');
+      }
+    }
+
+    // =====================
+    // UPLOAD FUNCTIONS
+    // =====================
+
+    function setupDropZone() {
+      const dropZone = $('dropZone');
+      const fileInput = $('fileInput');
+
+      dropZone.addEventListener('dragover', e => {
+        e.preventDefault();
+        dropZone.classList.add('dragover');
+      });
+
+      dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('dragover');
+      });
+
+      dropZone.addEventListener('drop', e => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        if (e.dataTransfer.files.length) {
+          handleFileSelect(e.dataTransfer.files[0]);
+        }
+      });
+
+      fileInput.addEventListener('change', e => {
+        if (e.target.files.length) {
+          handleFileSelect(e.target.files[0]);
+        }
+      });
+    }
+
+    function handleFileSelect(file) {
+      selectedFile = file;
+      $('uploadBtn').disabled = !accessToken;
+      $('uploadFileName').textContent = `${file.name} (${formatBytes(file.size)})`;
+      $('uploadProgress').classList.remove('hidden');
+      log('uploadLog', `Selected: ${file.name}`, 'info');
+    }
+
+    function startUpload() {
+      if (!selectedFile || !accessToken) return;
+
+      const title = $('lectureTitle').value || selectedFile.name;
+      const language = $('lectureLanguage').value;
+      const summarizationType = $('summarizationType').value;
+
+      // Encode metadata as base64
+      const metadata = {
+        filename: btoa(unescape(encodeURIComponent(selectedFile.name))),
+        filetype: btoa(selectedFile.type),
+        title: btoa(unescape(encodeURIComponent(title))),
+        language: btoa(language),
+        summarizationType: btoa(summarizationType)
+      };
+
+      log('uploadLog', `Starting TUS upload (${summarizationType === 'custdev' ? 'CustDev Analysis' : 'Lecture Summary'})...`, 'info');
+
+      currentUpload = new tus.Upload(selectedFile, {
+        endpoint: `${apiUrl()}/api/v1/uploads`,
+        retryDelays: [0, 3000, 5000, 10000],
+        chunkSize: 10 * 1024 * 1024, // 10MB chunks
+        metadata: metadata,
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        },
+        onError: error => {
+          log('uploadLog', `Upload failed: ${error.message}`, 'error');
+          resetUploadUI();
+        },
+        onProgress: (bytesUploaded, bytesTotal) => {
+          const percentage = Math.round((bytesUploaded / bytesTotal) * 100);
+          $('uploadProgressFill').style.width = `${percentage}%`;
+          $('uploadProgressText').textContent = `${percentage}% (${formatBytes(bytesUploaded)} / ${formatBytes(bytesTotal)})`;
+        },
+        onSuccess: () => {
+          log('uploadLog', 'Upload complete!', 'success');
+
+          // Extract lecture ID from response headers if available
+          const lectureId = currentUpload.url?.split('/').pop();
+          if (lectureId) {
+            log('uploadLog', `Lecture ID: ${lectureId}`, 'info');
+          }
+
+          resetUploadUI();
+          loadLectures();
+        }
+      });
+
+      $('uploadBtn').classList.add('hidden');
+      $('cancelBtn').classList.remove('hidden');
+
+      currentUpload.start();
+    }
+
+    function cancelUpload() {
+      if (currentUpload) {
+        currentUpload.abort();
+        log('uploadLog', 'Upload cancelled', 'info');
+        resetUploadUI();
+      }
+    }
+
+    function resetUploadUI() {
+      currentUpload = null;
+      selectedFile = null;
+      $('uploadBtn').classList.remove('hidden');
+      $('uploadBtn').disabled = true;
+      $('cancelBtn').classList.add('hidden');
+      $('fileInput').value = '';
+      $('uploadProgress').classList.add('hidden');
+      $('uploadProgressFill').style.width = '0%';
+    }
+
+    // =====================
+    // LECTURES FUNCTIONS
+    // =====================
+
+    async function loadLectures(page = 1) {
+      if (!accessToken) {
+        $('lecturesList').innerHTML = '<p style="color:#64748b">Please login to view lectures</p>';
+        return;
+      }
+
+      const status = $('statusFilter').value;
+      let url = `/api/v1/lectures?page=${page}&limit=10`;
+      if (status) url += `&status=${status}`;
+
+      try {
+        const res = await apiCall(url);
+        if (res.success) {
+          renderLectures(res.data, res.pagination);
+        } else {
+          log('apiLog', `Failed to load lectures: ${res.error?.message}`, 'error');
+        }
+      } catch (e) {
+        log('apiLog', `Error loading lectures: ${e.message}`, 'error');
+      }
+    }
+
+    function renderLectures(lectures, pagination) {
+      const container = $('lecturesList');
+
+      if (!lectures.length) {
+        container.innerHTML = '<p style="color:#64748b">No lectures found</p>';
+        return;
+      }
+
+      container.innerHTML = lectures.map(l => `
+        <div class="lecture-item ${l.id === selectedLectureId ? 'selected' : ''}"
+             onclick="selectLecture('${l.id}')">
+          <h3>${escapeHtml(l.title || l.originalFilename)}</h3>
+          <div class="meta">
+            <span class="status ${l.status}">${l.status}</span>
+            ${l.durationFormatted ? `<span style="margin-left:10px">${l.durationFormatted}</span>` : ''}
+            <span style="margin-left:10px">${formatBytes(l.fileSizeBytes)}</span>
+            <span style="margin-left:10px">${new Date(l.createdAt).toLocaleDateString()}</span>
+          </div>
+          ${l.errorMessage ? `<p style="color:#f87171; font-size:12px; margin-top:5px">${escapeHtml(l.errorMessage)}</p>` : ''}
+        </div>
+      `).join('');
+
+      // Pagination
+      if (pagination && pagination.totalPages > 1) {
+        $('pagination').innerHTML = `
+          <button onclick="loadLectures(${pagination.page - 1})" ${!pagination.hasPrev ? 'disabled' : ''} style="width:auto">Prev</button>
+          <span style="margin: 0 15px">Page ${pagination.page} of ${pagination.totalPages}</span>
+          <button onclick="loadLectures(${pagination.page + 1})" ${!pagination.hasNext ? 'disabled' : ''} style="width:auto">Next</button>
+        `;
+      } else {
+        $('pagination').innerHTML = '';
+      }
+    }
+
+    async function selectLecture(id) {
+      selectedLectureId = id;
+      $('lectureDetails').classList.remove('hidden');
+
+      // Refresh list to show selection
+      document.querySelectorAll('.lecture-item').forEach(el => {
+        el.classList.toggle('selected', el.onclick.toString().includes(id));
+      });
+
+      try {
+        const res = await apiCall(`/api/v1/lectures/${id}`);
+        if (res.success) {
+          renderLectureDetails(res.data.lecture);
+
+          // Start polling if still processing
+          if (['uploaded', 'extracting', 'transcribing', 'summarizing'].includes(res.data.lecture.status)) {
+            startPolling(id);
+          } else {
+            stopPolling();
+          }
+        }
+      } catch (e) {
+        log('apiLog', `Error loading lecture: ${e.message}`, 'error');
+      }
+    }
+
+    function renderLectureDetails(lecture) {
+      const isCustDev = lecture.summarizationType === 'custdev';
+      const typeLabel = isCustDev ? '💼 CustDev Analysis' : '📚 Lecture Summary';
+
+      $('lectureInfo').innerHTML = `
+        <h3 style="margin-bottom:10px">${escapeHtml(lecture.title || lecture.originalFilename)}</h3>
+        <p><strong>Status:</strong> <span class="status ${lecture.status}">${lecture.status}</span></p>
+        <p><strong>Type:</strong> ${typeLabel}</p>
+        <p><strong>Language:</strong> ${lecture.language || 'Not set'}</p>
+        <p><strong>Duration:</strong> ${lecture.durationFormatted || 'Processing...'}</p>
+        <p><strong>File:</strong> ${escapeHtml(lecture.originalFilename)} (${formatBytes(lecture.fileSizeBytes)})</p>
+        ${lecture.errorMessage ? `<p style="color:#f87171"><strong>Error:</strong> ${escapeHtml(lecture.errorMessage)}</p>` : ''}
+        <div style="margin-top:15px">
+          <button onclick="deleteLecture('${lecture.id}')" class="danger" style="width:auto">Delete Lecture</button>
+        </div>
+      `;
+
+      // Toggle between lecture and custdev tabs
+      $('lectureTabs').classList.toggle('hidden', isCustDev);
+      $('custdevTabs').classList.toggle('hidden', !isCustDev);
+
+      // Render transcription (common for both types)
+      if (lecture.transcription) {
+        const t = lecture.transcription;
+        let html = `<h4>Full Text (${t.wordCount || 0} words)</h4><p>${escapeHtml(t.fullText)}</p>`;
+
+        if (t.segments && t.segments.length) {
+          html += '<h4>Segments</h4>';
+          html += t.segments.map(s => `
+            <div class="segment">
+              <span class="time">${s.startTimeFormatted} - ${s.endTimeFormatted}</span>
+              ${s.speaker ? `<span style="margin-left:10px; color:#94a3b8">[${s.speaker}]</span>` : ''}
+              <div class="text">${escapeHtml(s.text)}</div>
+            </div>
+          `).join('');
+        }
+
+        $('transcriptionTab').innerHTML = html;
+      } else {
+        $('transcriptionTab').innerHTML = '<p style="color:#64748b">Transcription not available yet</p>';
+      }
+
+      if (isCustDev) {
+        // Render CustDev specific data
+        renderCustDevData(lecture);
+      } else {
+        // Render lecture summary
+        if (lecture.summary) {
+          const s = lecture.summary;
+          let html = `<h4>Overview</h4><p>${escapeHtml(s.overview)}</p>`;
+
+          if (s.chapters && s.chapters.length) {
+            html += '<h4>Chapters</h4>';
+            html += s.chapters.map(c => `
+              <div class="segment">
+                <span class="time">${c.startTimeFormatted} - ${c.endTimeFormatted}</span>
+                <div class="text"><strong>${escapeHtml(c.title)}</strong><br>${escapeHtml(c.summary)}</div>
+              </div>
+            `).join('');
+          }
+
+          $('summaryTab').innerHTML = html;
+        } else {
+          $('summaryTab').innerHTML = '<p style="color:#64748b">Summary not available yet</p>';
+        }
+
+        // Render key points
+        if (lecture.keyPoints && lecture.keyPoints.length) {
+          $('keypointsTab').innerHTML = lecture.keyPoints.map(kp => `
+            <div class="key-point">
+              <div class="title">${kp.index}. ${escapeHtml(kp.title)}</div>
+              ${kp.description ? `<p>${escapeHtml(kp.description)}</p>` : ''}
+              <div style="margin-top:5px">
+                ${kp.timestampFormatted ? `<span class="time">${kp.timestampFormatted}</span>` : ''}
+                ${kp.importance ? `<span class="importance" style="margin-left:10px">${'★'.repeat(kp.importance)}${'☆'.repeat(5 - kp.importance)}</span>` : ''}
+              </div>
+            </div>
+          `).join('');
+        } else {
+          $('keypointsTab').innerHTML = '<p style="color:#64748b">Key points not available yet</p>';
+        }
+      }
+    }
+
+    function renderCustDevData(lecture) {
+      const custdev = lecture.summary?.custdevData;
+
+      if (!custdev) {
+        $('custdevSummaryTab').innerHTML = '<p style="color:#64748b">CustDev analysis not available yet</p>';
+        $('painpointsTab').innerHTML = '<p style="color:#64748b">Pain points not available yet</p>';
+        $('suggestionsTab').innerHTML = '<p style="color:#64748b">Suggestions not available yet</p>';
+        $('actionsTab').innerHTML = '<p style="color:#64748b">Action items not available yet</p>';
+        $('mindmapTab').innerHTML = '<p style="color:#64748b">Mind map not available yet</p>';
+        return;
+      }
+
+      // Call Summary tab
+      if (custdev.callSummary) {
+        const cs = custdev.callSummary;
+        $('custdevSummaryTab').innerHTML = `
+          <h4>${escapeHtml(cs.title)}</h4>
+          <p style="margin-bottom:15px">${escapeHtml(cs.overview)}</p>
+          <div class="segment">
+            <div class="title">Customer Mood</div>
+            <p>${escapeHtml(cs.customerMood)}</p>
+          </div>
+        `;
+      }
+
+      // Pain Points tab
+      if (custdev.keyPainPoints && custdev.keyPainPoints.length) {
+        $('painpointsTab').innerHTML = custdev.keyPainPoints.map((pp, idx) => `
+          <div class="key-point" style="border-left-color: #ef4444;">
+            <div class="title">🔴 ${idx + 1}. ${escapeHtml(pp.painPoint)}</div>
+            <p><strong>Impact:</strong> ${escapeHtml(pp.impact)}</p>
+            ${pp.timestampMs ? `<span class="time" style="margin-top:5px; display:inline-block">${formatTimestamp(pp.timestampMs)}</span>` : ''}
+          </div>
+        `).join('');
+      } else {
+        $('painpointsTab').innerHTML = '<p style="color:#64748b">No pain points identified</p>';
+      }
+
+      // Positive Feedback (in suggestions tab for now)
+      let suggestionsHtml = '';
+
+      if (custdev.positiveFeedback && custdev.positiveFeedback.length) {
+        suggestionsHtml += '<h4>✅ Positive Feedback</h4>';
+        suggestionsHtml += custdev.positiveFeedback.map(pf => `
+          <div class="segment" style="border-left: 3px solid #22c55e;">
+            <div class="text"><strong>${escapeHtml(pf.feature)}</strong><br>${escapeHtml(pf.benefit)}</div>
+            ${pf.timestampMs ? `<span class="time">${formatTimestamp(pf.timestampMs)}</span>` : ''}
+          </div>
+        `).join('');
+      }
+
+      if (custdev.productSuggestions && custdev.productSuggestions.length) {
+        suggestionsHtml += '<h4>💡 Product Suggestions</h4>';
+        suggestionsHtml += custdev.productSuggestions.map(ps => `
+          <div class="key-point" style="border-left-color: ${ps.priority === 'High' ? '#ef4444' : ps.priority === 'Medium' ? '#f59e0b' : '#22c55e'};">
+            <div class="title">[${ps.priority}] ${escapeHtml(ps.type)}</div>
+            <p>${escapeHtml(ps.description)}</p>
+            ${ps.relatedPainPoint ? `<p style="color:#94a3b8; font-size:12px; margin-top:5px">Related: ${escapeHtml(ps.relatedPainPoint)}</p>` : ''}
+          </div>
+        `).join('');
+      }
+
+      $('suggestionsTab').innerHTML = suggestionsHtml || '<p style="color:#64748b">No suggestions available</p>';
+
+      // Action Items tab
+      if (custdev.internalActionItems && custdev.internalActionItems.length) {
+        $('actionsTab').innerHTML = custdev.internalActionItems.map((ai, idx) => `
+          <div class="segment">
+            <span class="status" style="background: #3b82f6;">${escapeHtml(ai.owner)}</span>
+            <div class="text" style="margin-top:8px">${idx + 1}. ${escapeHtml(ai.action)}</div>
+            ${ai.timestampMs ? `<span class="time" style="margin-top:5px; display:inline-block">${formatTimestamp(ai.timestampMs)}</span>` : ''}
+          </div>
+        `).join('');
+      } else {
+        $('actionsTab').innerHTML = '<p style="color:#64748b">No action items identified</p>';
+      }
+
+      // Mind Map tab
+      renderMindMap(custdev.mindMap);
+    }
+
+    function renderMindMap(mindMap) {
+      if (!mindMap) {
+        $('mindmapTab').innerHTML = '<p style="color:#64748b">Mind map not available yet</p>';
+        return;
+      }
+
+      const branchColors = {
+        customerProfile: '#3b82f6',   // blue
+        needsAndGoals: '#22c55e',     // green
+        painPoints: '#ef4444',        // red
+        journeyStage: '#f59e0b',      // amber
+        opportunities: '#8b5cf6',     // purple
+        keyInsights: '#06b6d4',       // cyan
+        actionItems: '#ec4899'        // pink
+      };
+
+      let html = `
+        <div class="mindmap-container" style="padding: 20px;">
+          <!-- Central Node -->
+          <div style="text-align: center; margin-bottom: 30px;">
+            <div style="display: inline-block; background: linear-gradient(135deg, #1e293b 0%, #334155 100%); color: white; padding: 20px 30px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+              <h3 style="margin: 0; font-size: 1.3em;">${escapeHtml(mindMap.centralNode.label)}</h3>
+              <p style="margin: 8px 0 0 0; opacity: 0.8; font-size: 0.9em;">${escapeHtml(mindMap.centralNode.description)}</p>
+            </div>
+          </div>
+
+          <!-- Branches Grid -->
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
+      `;
+
+      // Customer Profile Branch
+      if (mindMap.branches.customerProfile) {
+        const branch = mindMap.branches.customerProfile;
+        html += renderMindMapBranch(branch.label, branchColors.customerProfile, '👤',
+          branch.items.map(item => `<strong>${escapeHtml(item.key)}:</strong> ${escapeHtml(item.value)}`).join('<br>')
+        );
+      }
+
+      // Needs and Goals Branch
+      if (mindMap.branches.needsAndGoals) {
+        const branch = mindMap.branches.needsAndGoals;
+        html += renderMindMapBranch(branch.label, branchColors.needsAndGoals, '🎯',
+          branch.items.map(item => {
+            const priorityColor = item.priority === 'High' ? '#ef4444' : item.priority === 'Medium' ? '#f59e0b' : '#22c55e';
+            return `<span style="color: ${priorityColor}; font-weight: bold;">[${item.priority}]</span> ${escapeHtml(item.goal)}`;
+          }).join('<br>')
+        );
+      }
+
+      // Pain Points Branch
+      if (mindMap.branches.painPoints) {
+        const branch = mindMap.branches.painPoints;
+        html += renderMindMapBranch(branch.label, branchColors.painPoints, '😣',
+          branch.items.map(item => {
+            const severityIcon = item.severity === 'Critical' ? '🔴' : item.severity === 'Major' ? '🟠' : '🟡';
+            return `${severityIcon} <strong>${escapeHtml(item.pain)}</strong><br><small style="color:#94a3b8">Emotion: ${escapeHtml(item.emotion)}</small>`;
+          }).join('<hr style="border: none; border-top: 1px solid #e2e8f0; margin: 8px 0;">')
+        );
+      }
+
+      // Journey Stage Branch
+      if (mindMap.branches.journeyStage) {
+        const branch = mindMap.branches.journeyStage;
+        html += renderMindMapBranch(branch.label, branchColors.journeyStage, '🛤️',
+          `<strong>Current Stage:</strong> ${escapeHtml(branch.currentStage)}<br><br>` +
+          `<strong>Touchpoints:</strong><br>` +
+          branch.touchpoints.map(t => `• ${escapeHtml(t)}`).join('<br>')
+        );
+      }
+
+      // Opportunities Branch
+      if (mindMap.branches.opportunities) {
+        const branch = mindMap.branches.opportunities;
+        html += renderMindMapBranch(branch.label, branchColors.opportunities, '💡',
+          branch.items.map(item => {
+            return `<strong>${escapeHtml(item.opportunity)}</strong><br>` +
+              `<small>Effort: <span style="color: ${item.effort === 'Low' ? '#22c55e' : item.effort === 'Medium' ? '#f59e0b' : '#ef4444'}">${item.effort}</span> | ` +
+              `Impact: <span style="color: ${item.impact === 'High' ? '#22c55e' : item.impact === 'Medium' ? '#f59e0b' : '#ef4444'}">${item.impact}</span></small>`;
+          }).join('<hr style="border: none; border-top: 1px solid #e2e8f0; margin: 8px 0;">')
+        );
+      }
+
+      // Key Insights Branch
+      if (mindMap.branches.keyInsights) {
+        const branch = mindMap.branches.keyInsights;
+        let insightsContent = '';
+
+        if (branch.patterns && branch.patterns.length) {
+          insightsContent += '<strong>Patterns:</strong><br>' +
+            branch.patterns.map(p => `🔄 ${escapeHtml(p)}`).join('<br>') + '<br><br>';
+        }
+
+        if (branch.quotes && branch.quotes.length) {
+          insightsContent += '<strong>Key Quotes:</strong><br>' +
+            branch.quotes.map(q => `<em>"${escapeHtml(q.text)}"</em><br><small style="color:#94a3b8">${escapeHtml(q.context)}</small>`).join('<br><br>');
+        }
+
+        html += renderMindMapBranch(branch.label, branchColors.keyInsights, '🔍', insightsContent || 'No insights');
+      }
+
+      // Action Items Branch
+      if (mindMap.branches.actionItems) {
+        const branch = mindMap.branches.actionItems;
+        html += renderMindMapBranch(branch.label, branchColors.actionItems, '✅',
+          branch.items.map((item, idx) => {
+            const priorityColor = item.priority === 'High' ? '#ef4444' : item.priority === 'Medium' ? '#f59e0b' : '#22c55e';
+            return `<div style="margin-bottom: 8px;">` +
+              `<span style="background: #3b82f6; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.75em;">${escapeHtml(item.owner)}</span>` +
+              `<span style="background: ${priorityColor}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.75em; margin-left: 4px;">${item.priority}</span>` +
+              `<br>${idx + 1}. ${escapeHtml(item.action)}</div>`;
+          }).join('')
+        );
+      }
+
+      html += '</div>'; // End branches grid
+
+      // Connections
+      if (mindMap.connections && mindMap.connections.length) {
+        html += `
+          <div style="margin-top: 30px; padding: 15px; background: #f8fafc; border-radius: 12px;">
+            <h4 style="margin: 0 0 10px 0; color: #475569;">🔗 Connections & Insights</h4>
+            ${mindMap.connections.map(conn => `
+              <div style="display: flex; align-items: center; margin: 8px 0; padding: 8px; background: white; border-radius: 8px;">
+                <span style="background: ${branchColors[conn.from] || '#64748b'}; color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85em;">${escapeHtml(conn.from)}</span>
+                <span style="margin: 0 10px; color: #94a3b8;">→</span>
+                <span style="background: ${branchColors[conn.to] || '#64748b'}; color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85em;">${escapeHtml(conn.to)}</span>
+                <span style="margin-left: 15px; color: #64748b; font-size: 0.9em;">${escapeHtml(conn.reason)}</span>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      }
+
+      html += '</div>'; // End container
+
+      $('mindmapTab').innerHTML = html;
+    }
+
+    function renderMindMapBranch(label, color, icon, content) {
+      return `
+        <div style="background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); overflow: hidden;">
+          <div style="background: ${color}; color: white; padding: 12px 16px; display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 1.2em;">${icon}</span>
+            <strong>${escapeHtml(label)}</strong>
+          </div>
+          <div style="padding: 16px; font-size: 0.9em; line-height: 1.6;">
+            ${content}
+          </div>
+        </div>
+      `;
+    }
+
+    function formatTimestamp(ms) {
+      const totalSeconds = Math.floor(ms / 1000);
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    }
+
+    async function deleteLecture(id) {
+      if (!confirm('Are you sure you want to delete this lecture?')) return;
+
+      try {
+        const res = await apiCall(`/api/v1/lectures/${id}`, { method: 'DELETE' });
+        if (res.success) {
+          log('apiLog', 'Lecture deleted', 'success');
+          selectedLectureId = null;
+          $('lectureDetails').classList.add('hidden');
+          loadLectures();
+        } else {
+          log('apiLog', `Delete failed: ${res.error?.message}`, 'error');
+        }
+      } catch (e) {
+        log('apiLog', `Delete error: ${e.message}`, 'error');
+      }
+    }
+
+    function startPolling(lectureId) {
+      stopPolling();
+      pollingInterval = setInterval(async () => {
+        try {
+          const res = await apiCall(`/api/v1/lectures/${lectureId}`);
+          if (res.success) {
+            renderLectureDetails(res.data.lecture);
+            loadLectures(); // Refresh list too
+
+            if (['completed', 'failed'].includes(res.data.lecture.status)) {
+              stopPolling();
+            }
+          }
+        } catch (e) {
+          console.error('Polling error:', e);
+        }
+      }, 5000);
+    }
+
+    function stopPolling() {
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+        pollingInterval = null;
+      }
+    }
+
+    // =====================
+    // UI HELPERS
+    // =====================
+
+    function showTab(tab) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll(`.tab[onclick="showTab('${tab}')"]`).forEach(t => t.classList.add('active'));
+
+      // All possible tabs
+      const allTabs = ['transcription', 'summary', 'keypoints', 'custdevSummary', 'painpoints', 'suggestions', 'actions', 'mindmap'];
+      allTabs.forEach(t => {
+        const tabEl = $(`${t}Tab`);
+        if (tabEl) {
+          tabEl.classList.toggle('hidden', t !== tab);
+        }
+      });
+    }
+
+    function log(elementId, message, type = '') {
+      const el = $(elementId);
+      const time = new Date().toLocaleTimeString();
+      el.innerHTML += `<div class="${type}">[${time}] ${escapeHtml(message)}</div>`;
+      el.scrollTop = el.scrollHeight;
+    }
+
+    function formatBytes(bytes) {
+      if (bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    function escapeHtml(text) {
+      if (!text) return '';
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>

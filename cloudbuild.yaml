@@ -74,6 +74,28 @@ steps:
     id: 'push-worker-latest'
     waitFor: ['build-worker']
 
+  # Run database migrations using Cloud Run Jobs
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        gcloud run jobs deploy dabir-migrate \
+          --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_API_SERVICE_NAME}:$COMMIT_SHA \
+          --region=${_REGION} \
+          --service-account=${_SERVICE_ACCOUNT} \
+          --add-cloudsql-instances=$PROJECT_ID:${_REGION}:${_DB_INSTANCE} \
+          --vpc-connector=${_VPC_CONNECTOR} \
+          --set-secrets=DATABASE_URL=DATABASE_URL:latest \
+          --command="node" \
+          --args="dist/db/migrate.js" \
+          --max-retries=0 \
+          --task-timeout=300 \
+          --quiet
+        gcloud run jobs execute dabir-migrate --region=${_REGION} --wait
+    id: 'run-migrations'
+    waitFor: ['push-api']
+
   # Deploy API to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
@@ -107,9 +129,9 @@ steps:
       - '--set-env-vars'
       - 'NODE_ENV=production,GCP_PROJECT_ID=$PROJECT_ID,GCS_BUCKET_NAME=${_GCS_BUCKET},GCP_REGION=${_REGION}'
       - '--set-secrets'
-      - 'DATABASE_URL=DATABASE_URL:latest,REDIS_URL=REDIS_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest'
+      - 'DATABASE_URL=DATABASE_URL:latest,REDIS_URL=REDIS_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,TELEGRAM_BOT_TOKEN=TELEGRAM_BOT_TOKEN:latest,TELEGRAM_WEBHOOK_SECRET=TELEGRAM_WEBHOOK_SECRET:latest,TELEGRAM_BOT_WEBHOOK_URL=TELEGRAM_BOT_WEBHOOK_URL:latest'
     id: 'deploy-api'
-    waitFor: ['push-api']
+    waitFor: ['run-migrations']
 
   # Deploy Worker to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -144,9 +166,9 @@ steps:
       - '--set-env-vars'
       - 'NODE_ENV=production,GCP_PROJECT_ID=$PROJECT_ID,GCS_BUCKET_NAME=${_GCS_BUCKET},GCP_REGION=${_REGION}'
       - '--set-secrets'
-      - 'DATABASE_URL=DATABASE_URL:latest,REDIS_URL=REDIS_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest'
+      - 'DATABASE_URL=DATABASE_URL:latest,REDIS_URL=REDIS_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,TELEGRAM_BOT_TOKEN=TELEGRAM_BOT_TOKEN:latest,TELEGRAM_WEBHOOK_SECRET=TELEGRAM_WEBHOOK_SECRET:latest,TELEGRAM_BOT_WEBHOOK_URL=TELEGRAM_BOT_WEBHOOK_URL:latest'
     id: 'deploy-worker'
-    waitFor: ['push-worker']
+    waitFor: ['run-migrations']
 
 images:
   - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_API_SERVICE_NAME}:$COMMIT_SHA'

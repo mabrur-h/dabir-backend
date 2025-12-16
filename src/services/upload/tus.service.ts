@@ -1,11 +1,12 @@
 import { Server as TusServer, Upload } from '@tus/server';
 import { GCSStore } from '@tus/gcs-store';
+import { Storage } from '@google-cloud/storage';
 import type { Request, Response } from 'express';
 import { config } from '../../config/index.js';
 import { createLogger } from '../../utils/logger.js';
-import { GCS_PATHS } from '../../config/constants.js';
 import * as lectureService from '../lecture/lecture.service.js';
 import { addAudioExtractionJob } from '../queue/queue.service.js';
+import { getFileMd5Hash, deleteFile } from './gcs.service.js';
 
 const logger = createLogger('tus-service');
 
@@ -21,12 +22,13 @@ export function createTusServer(): TusServer {
   }
 
   // Create GCS store for tus
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const store = new GCSStore({
-    bucket: config.gcp.bucketName,
+  // GCSStore expects a Bucket instance, not bucket name
+  const storage = new Storage({
     projectId: config.gcp.projectId,
     keyFilename: config.gcp.credentials,
-  } as any);
+  });
+  const bucket = storage.bucket(config.gcp.bucketName);
+  const store = new GCSStore({ bucket });
 
   tusServer = new TusServer({
     path: '/api/v1/uploads',
@@ -40,16 +42,57 @@ export function createTusServer(): TusServer {
     },
 
     // Extract metadata from upload
+    // This returns the GCS object path (which also becomes the upload ID in URLs)
+    // NOTE: The returned ID should NOT include 'uploads/' prefix since the route is already at /api/v1/uploads
+    // The GCS path will be constructed separately
     namingFunction: (_req, metadata) => {
       // Use user ID and timestamp for unique naming
-      const userId = metadata?.userId || 'unknown';
+      let userId = metadata?.userId || 'unknown';
+      // Decode base64 if needed (check if it looks like a UUID)
+      if (userId !== 'unknown' && !userId.includes('-')) {
+        try {
+          const decoded = Buffer.from(userId, 'base64').toString('utf-8');
+          if (/^[0-9a-f-]{36}$/i.test(decoded)) {
+            userId = decoded;
+          }
+        } catch {
+          // Keep original
+        }
+      }
       const timestamp = Date.now();
       const randomId = Math.random().toString(36).substring(2, 10);
-      return `${GCS_PATHS.UPLOADS}/${userId}/${timestamp}-${randomId}`;
+      // Return just the unique ID part - GCSStore will handle storage path
+      return `${userId}/${timestamp}-${randomId}`;
+    },
+
+    // Override getUpload ID extraction to handle the nested path
+    getFileIdFromRequest: (req) => {
+      // The URL here is the path after the route prefix
+      // For example: "/userId/timestamp-random" (Express strips /api/v1/uploads)
+      const url = req.url || '';
+      logger.debug({ url }, 'getFileIdFromRequest called');
+
+      // Extract the upload ID (userId/timestamp-random pattern)
+      // URL format: /userId/timestamp-random
+      const match = url.match(/^\/([^/]+\/[^/]+)$/);
+      if (match) {
+        return match[1];
+      }
+
+      // Fallback: if URL starts with /, remove it and return the rest
+      if (url.startsWith('/')) {
+        const id = url.slice(1);
+        if (id) return id;
+      }
+
+      return undefined;
     },
 
     // Called when upload is created
     onUploadCreate: async (_req, _res, upload) => {
+      // Debug: log raw metadata to understand encoding
+      logger.debug({ rawMetadata: upload.metadata }, 'Raw metadata in onUploadCreate');
+
       logger.info(
         {
           uploadId: upload.id,
@@ -60,16 +103,28 @@ export function createTusServer(): TusServer {
       );
 
       // Validate file type
-      const mimeType = upload.metadata?.filetype || upload.metadata?.mimeType;
-      if (mimeType && !config.upload.allowedMimeTypes.includes(mimeType)) {
-        throw { status_code: 415, body: `File type ${mimeType} is not allowed` };
+      // Note: Check if TUS decoded the metadata or not
+      let mimeType = upload.metadata?.filetype || upload.metadata?.mimeType;
+      if (mimeType) {
+        // Try to decode if it looks like base64 (no slashes in raw base64 for mime types)
+        if (!mimeType.includes('/')) {
+          try {
+            mimeType = Buffer.from(mimeType, 'base64').toString('utf-8');
+          } catch {
+            // Keep original if decode fails
+          }
+        }
+        logger.debug({ mimeType, allowed: config.upload.allowedMimeTypes }, 'Checking mime type');
+        if (!config.upload.allowedMimeTypes.includes(mimeType)) {
+          throw { status_code: 415, body: `File type ${mimeType} is not allowed` };
+        }
       }
 
       return _res;
     },
 
     // Called when upload is complete
-    onUploadFinish: async (req, res, upload) => {
+    onUploadFinish: async (_req, res, upload) => {
       logger.info(
         {
           uploadId: upload.id,
@@ -80,21 +135,73 @@ export function createTusServer(): TusServer {
       );
 
       try {
-        // Extract metadata
-        const userId = upload.metadata?.userId;
-        const filename = upload.metadata?.filename || 'untitled';
-        const mimeType = upload.metadata?.filetype || upload.metadata?.mimeType || 'application/octet-stream';
-        const title = upload.metadata?.title;
-        const language = upload.metadata?.language || 'uz';
+        // Extract metadata - decode base64 if needed
+        const decodeIfBase64 = (value: string | null | undefined): string | undefined => {
+          if (!value) return undefined;
+          // If it contains typical plaintext chars, assume it's already decoded
+          if (value.includes('/') || value.includes(' ') || value.includes('@')) {
+            return value;
+          }
+          try {
+            const decoded = Buffer.from(value, 'base64').toString('utf-8');
+            // Verify it decoded to something reasonable (printable ASCII)
+            if (/^[\x20-\x7E]+$/.test(decoded)) {
+              return decoded;
+            }
+          } catch {
+            // Decode failed, use original
+          }
+          return value;
+        };
+
+        const userId = decodeIfBase64(upload.metadata?.userId);
+        const filename = decodeIfBase64(upload.metadata?.filename) || 'untitled';
+        const mimeType = decodeIfBase64(upload.metadata?.filetype || upload.metadata?.mimeType) || 'application/octet-stream';
+        const title = decodeIfBase64(upload.metadata?.title);
+        const language = decodeIfBase64(upload.metadata?.language) || 'uz';
+        const summarizationType = decodeIfBase64(upload.metadata?.summarizationType) as 'lecture' | 'custdev' | undefined;
 
         if (!userId) {
           logger.error({ uploadId: upload.id }, 'Upload missing userId in metadata');
           return res;
         }
 
-        // Create lecture record
+        // The upload.id is just userId/timestamp-random, GCS stores it at that path
         const gcsUri = `gs://${config.gcp.bucketName}/${upload.id}`;
 
+        // Get content hash from GCS for deduplication
+        const contentHash = await getFileMd5Hash(upload.id);
+
+        // Check for duplicate file
+        if (contentHash) {
+          const existingLecture = await lectureService.findLectureByContentHash(userId, contentHash);
+
+          if (existingLecture) {
+            logger.info(
+              {
+                uploadId: upload.id,
+                existingLectureId: existingLecture.id,
+                contentHash
+              },
+              'Duplicate file detected, returning existing lecture'
+            );
+
+            // Delete the duplicate file from GCS to save space
+            try {
+              await deleteFile(upload.id);
+              logger.info({ uploadId: upload.id }, 'Deleted duplicate file from GCS');
+            } catch (deleteError) {
+              logger.warn({ error: deleteError, uploadId: upload.id }, 'Failed to delete duplicate file');
+            }
+
+            // Return the existing lecture ID
+            res.setHeader('X-Lecture-Id', existingLecture.id);
+            res.setHeader('X-Duplicate', 'true');
+            return res;
+          }
+        }
+
+        // Create new lecture record
         const lecture = await lectureService.createLecture({
           userId,
           title: title ?? undefined,
@@ -103,10 +210,12 @@ export function createTusServer(): TusServer {
           fileSizeBytes: upload.size || 0,
           mimeType,
           language,
+          summarizationType: summarizationType || 'lecture',
+          contentHash: contentHash ?? undefined,
         });
 
         logger.info(
-          { uploadId: upload.id, lectureId: lecture.id },
+          { uploadId: upload.id, lectureId: lecture.id, contentHash },
           'Lecture created from upload'
         );
 
@@ -147,45 +256,72 @@ export function createTusServer(): TusServer {
 // EXPRESS HANDLER
 // ============================================
 
+// Cache the handler to avoid creating new ones on each route
+let cachedHandler: ((req: Request, res: Response) => Promise<void>) | null = null;
+
 /**
  * Express middleware handler for tus uploads
  */
 export function getTusHandler() {
+  if (cachedHandler) {
+    return cachedHandler;
+  }
+
   const server = createTusServer();
 
-  return async (req: Request, res: Response): Promise<void> => {
-    // Extract user ID from authenticated request and add to metadata
-    const userId = (req as Request & { user?: { id: string } }).user?.id;
+  const handler = async (req: Request, res: Response): Promise<void> => {
+    try {
+      logger.debug({ method: req.method, url: req.url }, 'TUS handler invoked');
 
-    if (!userId) {
-      res.status(401).json({
-        success: false,
-        error: {
-          code: 'UNAUTHORIZED',
-          message: 'Authentication required for uploads',
-        },
-      });
-      return;
-    }
+      // Extract user ID from authenticated request and add to metadata
+      const userId = (req as Request & { user?: { id: string } }).user?.id;
 
-    // For POST requests (creating uploads), inject userId into metadata
-    if (req.method === 'POST') {
-      const uploadMetadata = req.headers['upload-metadata'];
-      if (uploadMetadata && typeof uploadMetadata === 'string') {
-        // Parse existing metadata
-        const metadata = parseUploadMetadata(uploadMetadata);
-        metadata.userId = userId;
+      if (!userId) {
+        res.status(401).json({
+          success: false,
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required for uploads',
+          },
+        });
+        return;
+      }
 
-        // Rebuild metadata header
-        req.headers['upload-metadata'] = buildUploadMetadata(metadata);
-      } else {
-        req.headers['upload-metadata'] = buildUploadMetadata({ userId });
+      // For POST requests (creating uploads), inject userId into metadata
+      if (req.method === 'POST') {
+        const uploadMetadata = req.headers['upload-metadata'];
+        if (uploadMetadata && typeof uploadMetadata === 'string') {
+          // Parse existing metadata
+          const metadata = parseUploadMetadata(uploadMetadata);
+          metadata.userId = userId;
+
+          // Rebuild metadata header
+          req.headers['upload-metadata'] = buildUploadMetadata(metadata);
+        } else {
+          req.headers['upload-metadata'] = buildUploadMetadata({ userId });
+        }
+      }
+
+      // Handle the request
+      logger.debug({ method: req.method }, 'Passing to TUS server');
+      await server.handle(req, res);
+      logger.debug({ method: req.method }, 'TUS server handled request');
+    } catch (error) {
+      logger.error({ error, method: req.method, url: req.url }, 'TUS handler error');
+      if (!res.headersSent) {
+        res.status(500).json({
+          success: false,
+          error: {
+            code: 'UPLOAD_ERROR',
+            message: 'Upload processing failed',
+          },
+        });
       }
     }
-
-    // Handle the request
-    await server.handle(req, res);
   };
+
+  cachedHandler = handler;
+  return handler;
 }
 
 // ============================================

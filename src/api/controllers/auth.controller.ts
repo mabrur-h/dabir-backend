@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import * as authService from '../../services/auth/auth.service.js';
 import type { AuthenticatedRequest } from '../../types/index.js';
+import type { TelegramWebAppRequest } from '../middleware/telegramAuth.middleware.js';
 
 // ============================================
 // VALIDATION SCHEMAS
@@ -23,6 +24,10 @@ export const telegramAuthSchema = z.object({
   username: z.string().optional(),
   firstName: z.string().optional(),
   lastName: z.string().optional(),
+  languageCode: z.string().optional(),
+  isPremium: z.boolean().optional(),
+  photoUrl: z.string().url().optional(),
+  // For Telegram Login Widget verification
   authDate: z.number().optional(),
   hash: z.string().optional(),
 });
@@ -240,6 +245,47 @@ export async function linkTelegram(
     res.json({
       success: true,
       data: { user: updatedUser },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * POST /auth/telegram/webapp
+ * Authenticate with Telegram Mini App (WebApp)
+ * This endpoint validates the cryptographic init data from Telegram
+ * and creates/authenticates the user
+ *
+ * Headers: Authorization: tma <initDataRaw>
+ * Response: { user, tokens, isNewUser: boolean }
+ */
+export async function telegramWebAppAuth(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    // The middleware has already validated the init data and attached it to the request
+    const { telegramUser } = req as TelegramWebAppRequest;
+
+    const result = await authService.authenticateWithTelegramWebApp({
+      telegramId: telegramUser.id,
+      telegramUsername: telegramUser.username,
+      firstName: telegramUser.first_name,
+      lastName: telegramUser.last_name,
+      languageCode: telegramUser.language_code,
+      isPremium: telegramUser.is_premium,
+      photoUrl: telegramUser.photo_url,
+    });
+
+    res.status(result.isNewUser ? 201 : 200).json({
+      success: true,
+      data: {
+        user: result.user,
+        tokens: result.tokens,
+        isNewUser: result.isNewUser,
+      },
     });
   } catch (error) {
     next(error);

@@ -11,6 +11,7 @@ import {
   ConflictError,
   NotFoundError,
 } from '../../utils/errors.js';
+import * as subscriptionService from '../subscription/subscription.service.js';
 
 const logger = createLogger('auth-service');
 
@@ -46,9 +47,23 @@ export interface TelegramAuthInput {
   username?: string;
   firstName?: string;
   lastName?: string;
+  languageCode?: string;
+  isPremium?: boolean;
+  photoUrl?: string;
   // For Telegram Login Widget verification
   authDate?: number;
   hash?: string;
+}
+
+// Input for Telegram Mini App (WebApp) authentication
+export interface TelegramWebAppAuthInput {
+  telegramId: number;
+  telegramUsername?: string;
+  firstName: string;
+  lastName?: string;
+  languageCode?: string;
+  isPremium?: boolean;
+  photoUrl?: string;
 }
 
 export interface UserResponse {
@@ -56,6 +71,11 @@ export interface UserResponse {
   email: string | null;
   telegramId: number | null;
   telegramUsername: string | null;
+  telegramFirstName: string | null;
+  telegramLastName: string | null;
+  telegramLanguageCode: string | null;
+  telegramIsPremium: boolean | null;
+  telegramPhotoUrl: string | null;
   name: string | null;
   authProvider: string;
   createdAt: Date;
@@ -151,6 +171,11 @@ function formatUserResponse(user: typeof schema.users.$inferSelect): UserRespons
     email: user.email,
     telegramId: user.telegramId,
     telegramUsername: user.telegramUsername,
+    telegramFirstName: user.telegramFirstName,
+    telegramLastName: user.telegramLastName,
+    telegramLanguageCode: user.telegramLanguageCode,
+    telegramIsPremium: user.telegramIsPremium,
+    telegramPhotoUrl: user.telegramPhotoUrl,
     name: user.name,
     authProvider: user.authProvider,
     createdAt: user.createdAt,
@@ -199,6 +224,15 @@ export async function registerWithEmail(input: RegisterEmailInput): Promise<{
   }
 
   logger.info({ userId: user.id, email: user.email }, 'User registered with email');
+
+  // Create free subscription for new user
+  try {
+    await subscriptionService.createFreeSubscription(user.id);
+    logger.info({ userId: user.id }, 'Free subscription created for new user');
+  } catch (error) {
+    logger.error({ userId: user.id, error }, 'Failed to create free subscription');
+    // Don't fail registration if subscription creation fails
+  }
 
   const tokens = await createTokens(user);
 
@@ -249,7 +283,7 @@ export async function authenticateWithTelegram(input: TelegramAuthInput): Promis
   tokens: AuthTokens;
   isNewUser: boolean;
 }> {
-  const { telegramId, username, firstName, lastName } = input;
+  const { telegramId, username, firstName, lastName, languageCode, isPremium, photoUrl } = input;
 
   // Build name from Telegram data
   const name = [firstName, lastName].filter(Boolean).join(' ') || username || null;
@@ -262,12 +296,17 @@ export async function authenticateWithTelegram(input: TelegramAuthInput): Promis
   let isNewUser = false;
 
   if (!user) {
-    // Create new user
+    // Create new user with all available Telegram data
     const [newUser] = await db
       .insert(schema.users)
       .values({
         telegramId,
         telegramUsername: username,
+        telegramFirstName: firstName,
+        telegramLastName: lastName,
+        telegramLanguageCode: languageCode,
+        telegramIsPremium: isPremium ?? false,
+        telegramPhotoUrl: photoUrl,
         name,
         authProvider: 'telegram',
       })
@@ -281,21 +320,186 @@ export async function authenticateWithTelegram(input: TelegramAuthInput): Promis
     isNewUser = true;
 
     logger.info({ userId: user.id, telegramId }, 'User registered with Telegram');
-  } else {
-    // Update Telegram username if changed
-    if (username && user.telegramUsername !== username) {
-      await db
-        .update(schema.users)
-        .set({
-          telegramUsername: username,
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.users.id, user.id));
 
-      user.telegramUsername = username;
+    // Create free subscription for new user
+    try {
+      await subscriptionService.createFreeSubscription(user.id);
+      logger.info({ userId: user.id }, 'Free subscription created for new Telegram user');
+    } catch (error) {
+      logger.error({ userId: user.id, error }, 'Failed to create free subscription');
+    }
+  } else {
+    // Update Telegram info if changed
+    const updates: Partial<typeof schema.users.$inferInsert> = {
+      updatedAt: new Date(),
+    };
+
+    let hasChanges = false;
+
+    if (username !== undefined && user.telegramUsername !== username) {
+      updates.telegramUsername = username;
+      hasChanges = true;
+    }
+    if (firstName !== undefined && user.telegramFirstName !== firstName) {
+      updates.telegramFirstName = firstName;
+      hasChanges = true;
+    }
+    if (lastName !== undefined && user.telegramLastName !== lastName) {
+      updates.telegramLastName = lastName;
+      hasChanges = true;
+    }
+    if (languageCode !== undefined && user.telegramLanguageCode !== languageCode) {
+      updates.telegramLanguageCode = languageCode;
+      hasChanges = true;
+    }
+    if (isPremium !== undefined && user.telegramIsPremium !== isPremium) {
+      updates.telegramIsPremium = isPremium;
+      hasChanges = true;
+    }
+    if (photoUrl !== undefined && user.telegramPhotoUrl !== photoUrl) {
+      updates.telegramPhotoUrl = photoUrl;
+      hasChanges = true;
+    }
+
+    if (hasChanges) {
+      const [updatedUser] = await db
+        .update(schema.users)
+        .set(updates)
+        .where(eq(schema.users.id, user.id))
+        .returning();
+
+      if (updatedUser) {
+        user = updatedUser;
+      }
     }
 
     logger.info({ userId: user.id, telegramId }, 'User logged in with Telegram');
+  }
+
+  const tokens = await createTokens(user);
+
+  return {
+    user: formatUserResponse(user),
+    tokens,
+    isNewUser,
+  };
+}
+
+/**
+ * Authenticate user from Telegram Mini App (WebApp)
+ * This is the secure authentication method that validates cryptographic signatures
+ * from Telegram's init data. Creates a new user if one doesn't exist.
+ */
+export async function authenticateWithTelegramWebApp(input: TelegramWebAppAuthInput): Promise<{
+  user: UserResponse;
+  tokens: AuthTokens;
+  isNewUser: boolean;
+}> {
+  const {
+    telegramId,
+    telegramUsername,
+    firstName,
+    lastName,
+    languageCode,
+    isPremium,
+    photoUrl,
+  } = input;
+
+  // Build display name from Telegram data
+  const name = [firstName, lastName].filter(Boolean).join(' ') || telegramUsername || null;
+
+  // Check if user exists
+  let user = await db.query.users.findFirst({
+    where: eq(schema.users.telegramId, telegramId),
+  });
+
+  let isNewUser = false;
+
+  if (!user) {
+    // Create new user with all Telegram data
+    const [newUser] = await db
+      .insert(schema.users)
+      .values({
+        telegramId,
+        telegramUsername,
+        telegramFirstName: firstName,
+        telegramLastName: lastName,
+        telegramLanguageCode: languageCode,
+        telegramIsPremium: isPremium ?? false,
+        telegramPhotoUrl: photoUrl,
+        name,
+        authProvider: 'telegram',
+      })
+      .returning();
+
+    if (!newUser) {
+      throw new Error('Failed to create user');
+    }
+
+    user = newUser;
+    isNewUser = true;
+
+    logger.info(
+      { userId: user.id, telegramId, username: telegramUsername },
+      'User registered via Telegram Mini App'
+    );
+
+    // Create free subscription for new user
+    try {
+      await subscriptionService.createFreeSubscription(user.id);
+      logger.info({ userId: user.id }, 'Free subscription created for new Mini App user');
+    } catch (error) {
+      logger.error({ userId: user.id, error }, 'Failed to create free subscription');
+    }
+  } else {
+    // Update user's Telegram info if changed
+    const updates: Partial<typeof schema.users.$inferInsert> = {
+      updatedAt: new Date(),
+    };
+
+    let hasChanges = false;
+
+    if (telegramUsername !== undefined && user.telegramUsername !== telegramUsername) {
+      updates.telegramUsername = telegramUsername;
+      hasChanges = true;
+    }
+    if (firstName && user.telegramFirstName !== firstName) {
+      updates.telegramFirstName = firstName;
+      hasChanges = true;
+    }
+    if (lastName !== undefined && user.telegramLastName !== lastName) {
+      updates.telegramLastName = lastName;
+      hasChanges = true;
+    }
+    if (languageCode !== undefined && user.telegramLanguageCode !== languageCode) {
+      updates.telegramLanguageCode = languageCode;
+      hasChanges = true;
+    }
+    if (isPremium !== undefined && user.telegramIsPremium !== isPremium) {
+      updates.telegramIsPremium = isPremium;
+      hasChanges = true;
+    }
+    if (photoUrl !== undefined && user.telegramPhotoUrl !== photoUrl) {
+      updates.telegramPhotoUrl = photoUrl;
+      hasChanges = true;
+    }
+
+    if (hasChanges) {
+      const [updatedUser] = await db
+        .update(schema.users)
+        .set(updates)
+        .where(eq(schema.users.id, user.id))
+        .returning();
+
+      if (updatedUser) {
+        user = updatedUser;
+      }
+    }
+
+    logger.info(
+      { userId: user.id, telegramId, username: telegramUsername },
+      'User logged in via Telegram Mini App'
+    );
   }
 
   const tokens = await createTokens(user);

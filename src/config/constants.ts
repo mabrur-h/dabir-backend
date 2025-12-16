@@ -48,6 +48,17 @@ export type Language = (typeof LANGUAGES)[keyof typeof LANGUAGES];
 // Default language
 export const DEFAULT_LANGUAGE = LANGUAGES.UZBEK;
 
+// Summarization types
+export const SUMMARIZATION_TYPE = {
+  LECTURE: 'lecture',
+  CUSTDEV: 'custdev',
+} as const;
+
+export type SummarizationType = (typeof SUMMARIZATION_TYPE)[keyof typeof SUMMARIZATION_TYPE];
+
+// Default summarization type
+export const DEFAULT_SUMMARIZATION_TYPE = SUMMARIZATION_TYPE.LECTURE;
+
 // Importance levels for key points
 export const IMPORTANCE_LEVELS = {
   LOW: 1,

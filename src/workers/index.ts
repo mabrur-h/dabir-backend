@@ -51,7 +51,8 @@ async function startWorkers() {
     logger.info(`🎉 All ${workers.length} workers started successfully`);
 
     // Start health check server for Cloud Run
-    const PORT = process.env.PORT || 8080;
+    // Use WORKER_PORT for local dev, PORT for Cloud Run (each service gets its own PORT)
+    const PORT = process.env.WORKER_PORT || process.env.PORT || 8080;
     const server = http.createServer((req, res) => {
       if (req.url === '/health' || req.url === '/') {
         res.writeHead(200, { 'Content-Type': 'application/json' });

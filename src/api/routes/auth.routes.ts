@@ -1,40 +1,57 @@
 import { Router } from 'express';
 import * as authController from '../controllers/auth.controller.js';
 import { authenticate } from '../middleware/auth.middleware.js';
+import { validateTelegramInitData } from '../middleware/telegramAuth.middleware.js';
+import { authRateLimiter } from '../middleware/rateLimit.middleware.js';
 
 const router = Router();
 
 // ============================================
-// PUBLIC ROUTES
+// PUBLIC ROUTES (with auth rate limiting)
 // ============================================
 
 /**
  * POST /api/v1/auth/register
  * Register a new user with email and password
+ * Rate limited: 10 attempts per 15 minutes per IP
  *
  * Body: { email: string, password: string, name?: string }
  * Response: { user, tokens: { accessToken, refreshToken, expiresIn } }
  */
-router.post('/register', authController.register);
+router.post('/register', authRateLimiter, authController.register);
 
 /**
  * POST /api/v1/auth/login
  * Login with email and password
+ * Rate limited: 10 attempts per 15 minutes per IP
  *
  * Body: { email: string, password: string }
  * Response: { user, tokens: { accessToken, refreshToken, expiresIn } }
  */
-router.post('/login', authController.login);
+router.post('/login', authRateLimiter, authController.login);
 
 /**
  * POST /api/v1/auth/telegram
  * Authenticate with Telegram ID (for Telegram bot)
  * Creates account if user doesn't exist
+ * Rate limited: 10 attempts per 15 minutes per IP
  *
  * Body: { telegramId: number, username?: string, firstName?: string, lastName?: string }
  * Response: { user, tokens, isNewUser: boolean }
  */
-router.post('/telegram', authController.telegramAuth);
+router.post('/telegram', authRateLimiter, authController.telegramAuth);
+
+/**
+ * POST /api/v1/auth/telegram/webapp
+ * Authenticate with Telegram Mini App (WebApp)
+ * Validates cryptographic init data signature from Telegram
+ * Creates account if user doesn't exist
+ * Rate limited: 10 attempts per 15 minutes per IP
+ *
+ * Headers: Authorization: tma <initDataRaw>
+ * Response: { user, tokens, isNewUser: boolean }
+ */
+router.post('/telegram/webapp', authRateLimiter, validateTelegramInitData, authController.telegramWebAppAuth);
 
 /**
  * POST /api/v1/auth/refresh

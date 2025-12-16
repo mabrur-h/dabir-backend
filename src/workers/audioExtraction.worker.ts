@@ -6,6 +6,8 @@ import { db, schema } from '../db/index.js';
 import { eq } from 'drizzle-orm';
 import * as ffmpegService from '../services/processing/ffmpeg.service.js';
 import * as lectureService from '../services/lecture/lecture.service.js';
+import * as gcsService from '../services/upload/gcs.service.js';
+import * as subscriptionService from '../services/subscription/subscription.service.js';
 import { addTranscriptionJob } from '../services/queue/queue.service.js';
 import type { AudioExtractionJobData } from '../types/index.js';
 
@@ -45,6 +47,48 @@ async function processAudioExtraction(
     await lectureService.updateLectureAudioUri(lectureId, result.audioGcsUri);
     await lectureService.updateLectureDuration(lectureId, result.durationSeconds);
 
+    // Get lecture for user ID and language
+    const lecture = await db.query.lectures.findFirst({
+      where: eq(schema.lectures.id, lectureId),
+    });
+
+    if (!lecture) {
+      throw new Error('Lecture not found');
+    }
+
+    // Deduct minutes from user's subscription
+    const minutesDeducted = await subscriptionService.deductMinutes(
+      lecture.userId,
+      lectureId,
+      result.durationSeconds
+    );
+
+    if (!minutesDeducted) {
+      // User ran out of minutes - fail the job
+      logger.warn(
+        { lectureId, userId: lecture.userId, durationSeconds: result.durationSeconds },
+        'Insufficient minutes for processing'
+      );
+
+      await lectureService.updateLectureStatus(
+        lectureId,
+        LECTURE_STATUS.FAILED,
+        'Insufficient minutes. Please upgrade your plan or purchase additional minutes.'
+      );
+
+      await updateProcessingJob(lectureId, JOB_TYPE.AUDIO_EXTRACTION, {
+        status: JOB_STATUS.FAILED,
+        errorMessage: 'Insufficient minutes for processing',
+      });
+
+      throw new Error('Insufficient minutes for processing');
+    }
+
+    logger.info(
+      { lectureId, userId: lecture.userId, durationSeconds: result.durationSeconds },
+      'Minutes deducted for processing'
+    );
+
     await job.updateProgress(90);
 
     // Mark job as completed
@@ -54,17 +98,26 @@ async function processAudioExtraction(
       completedAt: new Date(),
     });
 
-    // Get lecture language for transcription
-    const lecture = await db.query.lectures.findFirst({
-      where: eq(schema.lectures.id, lectureId),
-    });
-
     // Queue transcription job
     await addTranscriptionJob({
       lectureId,
       audioGcsUri: result.audioGcsUri,
-      language: lecture?.language || 'uz',
+      language: lecture.language || 'uz',
     });
+
+    // Delete original file from GCS to save storage (keep only processed MP3)
+    // For audio passthrough, the original is already copied to audio path, so we can delete
+    try {
+      const { path: originalPath } = gcsService.parseGcsUri(gcsUri);
+      await gcsService.deleteFile(originalPath);
+      logger.info({ lectureId, gcsUri }, 'Original file deleted from GCS');
+
+      // Clear the original gcsUri in the database since file is deleted
+      await lectureService.clearLectureVideoUri(lectureId);
+    } catch (deleteError) {
+      // Log but don't fail the job if deletion fails
+      logger.warn({ deleteError, lectureId, gcsUri }, 'Failed to delete original file');
+    }
 
     await job.updateProgress(100);
 
@@ -149,6 +202,8 @@ export function createAudioExtractionWorker(): Worker<AudioExtractionJobData> {
         max: 5,
         duration: 60000, // Max 5 jobs per minute
       },
+      lockDuration: 1800000, // 30 minutes - audio extraction can take longer
+      stalledInterval: 30000, // Check for stalled jobs every 30 seconds
     }
   );
 
@@ -156,12 +211,36 @@ export function createAudioExtractionWorker(): Worker<AudioExtractionJobData> {
     logger.info({ jobId: job.id }, 'Audio extraction job completed');
   });
 
-  worker.on('failed', (job, error) => {
+  worker.on('failed', async (job, error) => {
     logger.error({ jobId: job?.id, error }, 'Audio extraction job failed');
+
+    // Update lecture status to failed when all retries are exhausted
+    if (job?.data?.lectureId) {
+      try {
+        await lectureService.updateLectureStatus(
+          job.data.lectureId,
+          LECTURE_STATUS.FAILED,
+          error instanceof Error ? error.message : 'Audio extraction failed after all retries'
+        );
+
+        await updateProcessingJob(job.data.lectureId, JOB_TYPE.AUDIO_EXTRACTION, {
+          status: JOB_STATUS.FAILED,
+          errorMessage: error instanceof Error ? error.message : 'Unknown error',
+        });
+
+        logger.info({ jobId: job.id, lectureId: job.data.lectureId }, 'Updated lecture status to failed');
+      } catch (updateError) {
+        logger.error({ updateError, jobId: job.id }, 'Failed to update lecture status after job failure');
+      }
+    }
   });
 
   worker.on('error', (error) => {
     logger.error({ error }, 'Audio extraction worker error');
+  });
+
+  worker.on('stalled', async (jobId) => {
+    logger.warn({ jobId }, 'Audio extraction job stalled - will be retried or marked as failed');
   });
 
   logger.info('Audio extraction worker started');

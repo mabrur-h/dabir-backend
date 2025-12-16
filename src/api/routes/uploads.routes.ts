@@ -1,11 +1,15 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth.middleware.js';
+import { uploadRateLimiter } from '../middleware/rateLimit.middleware.js';
 import { getTusHandler } from '../../services/upload/tus.service.js';
 
 const router = Router();
 
 // All upload routes require authentication
 router.use(authenticate);
+
+// Rate limit uploads: 10 per hour per user
+router.use(uploadRateLimiter);
 
 /**
  * TUS Upload Endpoints
@@ -28,7 +32,8 @@ router.use(authenticate);
  */
 
 // Handle all HTTP methods for tus protocol
+// Use wildcard (*) to capture nested paths like /uploads/userId/timestamp-random
 router.all('/', getTusHandler());
-router.all('/:id', getTusHandler());
+router.all('/*', getTusHandler());
 
 export default router;

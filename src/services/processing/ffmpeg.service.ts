@@ -75,7 +75,10 @@ export function getMediaInfo(inputPath: string): Promise<MediaInfo> {
   return new Promise((resolve, reject) => {
     ffmpeg.ffprobe(inputPath, (err, metadata) => {
       if (err) {
-        reject(err);
+        // FFmpeg errors don't serialize well to JSON, extract the message
+        const errorMessage = err.message || String(err) || 'FFprobe failed';
+        logger.error({ errorMessage, inputPath }, 'FFprobe error');
+        reject(new Error(`FFprobe failed: ${errorMessage}`));
         return;
       }
 
@@ -147,8 +150,9 @@ export function extractAudio(
         resolve();
       })
       .on('error', (err) => {
-        logger.error({ error: err, inputPath }, 'FFmpeg error');
-        reject(err);
+        const errorMessage = err.message || String(err) || 'FFmpeg conversion failed';
+        logger.error({ errorMessage, inputPath }, 'FFmpeg error');
+        reject(new Error(`FFmpeg failed: ${errorMessage}`));
       })
       .run();
   });
@@ -160,6 +164,7 @@ export function extractAudio(
 
 /**
  * Extract audio from a GCS file and upload the result back to GCS
+ * For pure audio files that already meet specs, skips re-encoding
  */
 export async function extractAudioFromGcs(
   lectureId: string,
@@ -185,8 +190,43 @@ export async function extractAudioFromGcs(
     const mediaInfo = await getMediaInfo(tempInputPath);
     logger.info({ lectureId, mediaInfo }, 'Media info retrieved');
 
-    // Extract audio
-    logger.info({ lectureId }, 'Extracting audio');
+    // Check if this is a pure audio file that can skip re-encoding
+    const isPureAudio = isAudioFile(mimeType);
+    const needsReencoding = !isPureAudio || audioNeedsReencoding(mediaInfo);
+
+    if (!needsReencoding) {
+      // Audio file already meets specs - use as-is (passthrough)
+      logger.info(
+        { lectureId, mimeType, mediaInfo },
+        'Audio file meets specs, skipping re-encoding (passthrough)'
+      );
+
+      // Upload original file directly to audio path
+      const audioGcsPath = gcsService.generateAudioPath(lectureId, outputFormat);
+      logger.info({ lectureId, audioGcsPath }, 'Uploading audio to GCS (passthrough)');
+
+      const readStream = createReadStream(tempInputPath);
+      const audioGcsUri = await gcsService.uploadStream(
+        audioGcsPath,
+        readStream,
+        'audio/mpeg'
+      );
+
+      return {
+        audioGcsUri,
+        durationSeconds: Math.round(mediaInfo.durationSeconds),
+        format: outputFormat,
+        sampleRate: mediaInfo.sampleRate || 16000,
+        channels: mediaInfo.channels || 1,
+        bitrate: mediaInfo.bitrate || 128000,
+      };
+    }
+
+    // Extract/convert audio (video files or audio needing re-encoding)
+    logger.info(
+      { lectureId, isPureAudio, needsReencoding },
+      isPureAudio ? 'Audio file needs re-encoding to meet specs' : 'Extracting audio from video'
+    );
     await extractAudio(tempInputPath, tempOutputPath, {
       format: outputFormat,
       sampleRate: 16000,
@@ -221,6 +261,43 @@ export async function extractAudioFromGcs(
     cleanupTempFile(tempInputPath);
     cleanupTempFile(tempOutputPath);
   }
+}
+
+// ============================================
+// AUDIO OPTIMIZATION HELPERS
+// ============================================
+
+/**
+ * Check if the file is a pure audio file (not video)
+ */
+export function isAudioFile(mimeType: string): boolean {
+  return mimeType.startsWith('audio/');
+}
+
+/**
+ * Check if audio file already meets the target specs and can skip re-encoding
+ * Target specs: MP3, 16kHz, mono, ~128kbps
+ */
+export function audioNeedsReencoding(mediaInfo: MediaInfo): boolean {
+  // If not MP3 format, needs re-encoding
+  const isMp3 = mediaInfo.format?.includes('mp3') || mediaInfo.audioCodec === 'mp3';
+  if (!isMp3) {
+    return true;
+  }
+
+  // Check sample rate - we want 16kHz for optimal speech recognition
+  // Allow some tolerance (accept 16kHz or close to it)
+  if (mediaInfo.sampleRate && mediaInfo.sampleRate > 24000) {
+    return true;
+  }
+
+  // Check channels - we want mono
+  if (mediaInfo.channels && mediaInfo.channels > 1) {
+    return true;
+  }
+
+  // Audio is compatible, no re-encoding needed
+  return false;
 }
 
 // ============================================

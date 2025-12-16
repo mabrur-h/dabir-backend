@@ -2,10 +2,15 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import swaggerUi from 'swagger-ui-express';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import routes from './api/routes/index.js';
 import { errorHandler } from './api/middleware/errorHandler.middleware.js';
 import { createLogger } from './utils/logger.js';
 import { swaggerDocument } from './config/swagger.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const logger = createLogger('app');
 
@@ -13,23 +18,65 @@ export const createApp = () => {
   const app = express();
 
   // Security middleware
-  app.use(helmet());
   app.use(
-    cors({
-      origin: process.env.CORS_ORIGIN || '*',
-      credentials: true,
+    helmet({
+      crossOriginOpenerPolicy: false,
+      crossOriginResourcePolicy: false,
     })
   );
 
-  // Body parsing
-  app.use(express.json({ limit: '10mb' }));
-  app.use(express.urlencoded({ extended: true }));
+  // CORS with TUS headers support
+  // Note: Safari requires explicit origin when credentials: true (doesn't work with '*')
+  const corsOrigin = process.env.CORS_ORIGIN;
+  app.use(
+    cors({
+      origin: corsOrigin === '*' ? true : (corsOrigin || true),
+      credentials: true,
+      exposedHeaders: [
+        'Upload-Offset',
+        'Upload-Length',
+        'Upload-Metadata',
+        'Tus-Resumable',
+        'Tus-Version',
+        'Tus-Extension',
+        'Tus-Max-Size',
+        'X-Lecture-Id',
+        'Location',
+      ],
+      allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+        'Upload-Offset',
+        'Upload-Length',
+        'Upload-Metadata',
+        'Tus-Resumable',
+        'X-HTTP-Method-Override',
+      ],
+    })
+  );
+
+  // Body parsing - skip for TUS upload routes (they handle raw binary data)
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/api/v1/uploads')) {
+      return next();
+    }
+    express.json({ limit: '10mb' })(req, res, next);
+  });
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/api/v1/uploads')) {
+      return next();
+    }
+    express.urlencoded({ extended: true })(req, res, next);
+  });
 
   // Swagger API documentation
   app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument, {
     customCss: '.swagger-ui .topbar { display: none }',
     customSiteTitle: 'UzNotes-AI API Documentation',
   }));
+
+  // Serve static test UI
+  app.use(express.static(path.join(__dirname, '../public')));
 
   // Serve OpenAPI spec as JSON
   app.get('/api/docs.json', (_req, res) => {

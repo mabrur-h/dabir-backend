@@ -60,6 +60,7 @@ export interface SummarizationJobData {
   lectureId: string;
   transcriptionId: string;
   language: string;
+  summarizationType: 'lecture' | 'custdev';
 }
 
 // Gemini response types
@@ -96,4 +97,102 @@ export interface SummaryResult {
   overview: string;
   chapters: ChapterSummary[];
   keyPoints: KeyPoint[];
+}
+
+// CustDev Summarization Types
+export interface CustDevCallSummary {
+  title: string;
+  overview: string;
+  customerMood: string;
+}
+
+export interface CustDevPainPoint {
+  painPoint: string;
+  impact: string;
+  timestampMs: number;
+}
+
+export interface CustDevPositiveFeedback {
+  feature: string;
+  benefit: string;
+  timestampMs: number;
+}
+
+export interface CustDevProductSuggestion {
+  type: string;
+  priority: 'High' | 'Medium' | 'Low';
+  description: string;
+  relatedPainPoint: string;
+}
+
+export interface CustDevActionItem {
+  owner: 'Sales' | 'Support' | 'Product' | string;
+  action: string;
+  timestampMs: number;
+}
+
+export interface CustDevSummaryResult {
+  callSummary: CustDevCallSummary;
+  keyPainPoints: CustDevPainPoint[];
+  positiveFeedback: CustDevPositiveFeedback[];
+  productSuggestions: CustDevProductSuggestion[];
+  internalActionItems: CustDevActionItem[];
+  mindMap: CustDevMindMap;
+}
+
+// CustDev Mind Map Types
+export interface MindMapNode {
+  id: string;
+  label: string;
+  type: 'central' | 'main' | 'sub' | 'detail' | 'action';
+  color?: string;
+  icon?: string;
+  children?: MindMapNode[];
+}
+
+export interface MindMapConnection {
+  from: string;
+  to: string;
+  label?: string;
+  style?: 'solid' | 'dashed';
+}
+
+export interface CustDevMindMap {
+  centralNode: {
+    label: string;
+    description: string;
+  };
+  branches: {
+    customerProfile: {
+      label: string;
+      items: Array<{ key: string; value: string }>;
+    };
+    needsAndGoals: {
+      label: string;
+      items: Array<{ goal: string; priority: 'High' | 'Medium' | 'Low' }>;
+    };
+    painPoints: {
+      label: string;
+      items: Array<{ pain: string; severity: 'Critical' | 'Major' | 'Minor'; emotion: string }>;
+    };
+    journeyStage: {
+      label: string;
+      currentStage: string;
+      touchpoints: string[];
+    };
+    opportunities: {
+      label: string;
+      items: Array<{ opportunity: string; effort: 'High' | 'Medium' | 'Low'; impact: 'High' | 'Medium' | 'Low' }>;
+    };
+    keyInsights: {
+      label: string;
+      patterns: string[];
+      quotes: Array<{ text: string; context: string }>;
+    };
+    actionItems: {
+      label: string;
+      items: Array<{ action: string; owner: string; priority: 'High' | 'Medium' | 'Low' }>;
+    };
+  };
+  connections: Array<{ from: string; to: string; reason: string }>;
 }

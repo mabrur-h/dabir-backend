@@ -115,6 +115,30 @@ export async function getFileMetadata(
 }
 
 /**
+ * Get file MD5 hash from GCS metadata
+ * GCS automatically calculates and stores MD5 hash for each uploaded file
+ * Returns hex-encoded MD5 hash (32 characters)
+ */
+export async function getFileMd5Hash(filePath: string): Promise<string | null> {
+  try {
+    const [metadata] = await getFile(filePath).getMetadata();
+
+    // GCS stores MD5 as base64-encoded string
+    const md5Base64 = metadata.md5Hash;
+    if (!md5Base64) {
+      return null;
+    }
+
+    // Convert base64 to hex
+    const md5Hex = Buffer.from(md5Base64, 'base64').toString('hex');
+    return md5Hex;
+  } catch (error) {
+    logger.error({ error, filePath }, 'Failed to get file MD5 hash');
+    return null;
+  }
+}
+
+/**
  * Upload a file from buffer
  */
 export async function uploadBuffer(

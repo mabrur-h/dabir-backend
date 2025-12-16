@@ -1,11 +1,12 @@
 import { Worker, Job } from 'bullmq';
 import { redisConnection } from '../services/queue/queue.service.js';
-import { QUEUE_NAMES, LECTURE_STATUS, JOB_TYPE, JOB_STATUS } from '../config/constants.js';
+import { QUEUE_NAMES, LECTURE_STATUS, JOB_TYPE, JOB_STATUS, SUMMARIZATION_TYPE, type SummarizationType } from '../config/constants.js';
 import { createLogger } from '../utils/logger.js';
 import { db, schema } from '../db/index.js';
 import { eq } from 'drizzle-orm';
 import * as geminiService from '../services/processing/gemini.service.js';
 import * as lectureService from '../services/lecture/lecture.service.js';
+import * as subscriptionService from '../services/subscription/subscription.service.js';
 import { addSummarizationJob } from '../services/queue/queue.service.js';
 import { timeStringToMs } from '../utils/time.js';
 import type { TranscriptionJobData } from '../types/index.js';
@@ -86,11 +87,19 @@ async function processTranscription(
       completedAt: new Date(),
     });
 
+    // Get lecture to retrieve summarizationType
+    const lecture = await db.query.lectures.findFirst({
+      where: eq(schema.lectures.id, lectureId),
+    });
+
+    const summarizationType = (lecture?.summarizationType as SummarizationType) || SUMMARIZATION_TYPE.LECTURE;
+
     // Queue summarization job
     await addSummarizationJob({
       lectureId,
       transcriptionId: transcription.id,
       language,
+      summarizationType,
     });
 
     await job.updateProgress(100);
@@ -112,6 +121,24 @@ async function processTranscription(
     };
   } catch (error) {
     logger.error({ error, jobId: job.id, lectureId }, 'Transcription failed');
+
+    // Get lecture to check if minutes were charged
+    const lecture = await db.query.lectures.findFirst({
+      where: eq(schema.lectures.id, lectureId),
+    });
+
+    // Refund minutes if they were charged
+    if (lecture && lecture.minutesCharged > 0 && !lecture.minutesRefunded) {
+      try {
+        await subscriptionService.refundMinutes(lecture.userId, lectureId);
+        logger.info(
+          { lectureId, userId: lecture.userId, minutesRefunded: lecture.minutesCharged },
+          'Minutes refunded for failed transcription'
+        );
+      } catch (refundError) {
+        logger.error({ refundError, lectureId }, 'Failed to refund minutes');
+      }
+    }
 
     // Update lecture status to failed
     await lectureService.updateLectureStatus(
@@ -182,6 +209,8 @@ export function createTranscriptionWorker(): Worker<TranscriptionJobData> {
         max: 10,
         duration: 60000, // Max 10 jobs per minute (rate limiting for Gemini)
       },
+      lockDuration: 600000, // 10 minutes - how long a job can run before considered stalled
+      stalledInterval: 30000, // Check for stalled jobs every 30 seconds
     }
   );
 
@@ -189,12 +218,36 @@ export function createTranscriptionWorker(): Worker<TranscriptionJobData> {
     logger.info({ jobId: job.id }, 'Transcription job completed');
   });
 
-  worker.on('failed', (job, error) => {
+  worker.on('failed', async (job, error) => {
     logger.error({ jobId: job?.id, error }, 'Transcription job failed');
+
+    // Update lecture status to failed when all retries are exhausted
+    if (job?.data?.lectureId) {
+      try {
+        await lectureService.updateLectureStatus(
+          job.data.lectureId,
+          LECTURE_STATUS.FAILED,
+          error instanceof Error ? error.message : 'Transcription failed after all retries'
+        );
+
+        await updateProcessingJob(job.data.lectureId, JOB_TYPE.TRANSCRIPTION, {
+          status: JOB_STATUS.FAILED,
+          errorMessage: error instanceof Error ? error.message : 'Unknown error',
+        });
+
+        logger.info({ jobId: job.id, lectureId: job.data.lectureId }, 'Updated lecture status to failed');
+      } catch (updateError) {
+        logger.error({ updateError, jobId: job.id }, 'Failed to update lecture status after job failure');
+      }
+    }
   });
 
   worker.on('error', (error) => {
     logger.error({ error }, 'Transcription worker error');
+  });
+
+  worker.on('stalled', async (jobId) => {
+    logger.warn({ jobId }, 'Transcription job stalled - will be retried or marked as failed');
   });
 
   logger.info('Transcription worker started');

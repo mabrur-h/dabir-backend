@@ -34,6 +34,9 @@ const envSchema = z.object({
   // Rate Limiting
   RATE_LIMIT_WINDOW_MS: z.string().transform(Number).default('60000'),
   RATE_LIMIT_MAX_REQUESTS: z.string().transform(Number).default('100'),
+  // Upload rate limiting (per user)
+  UPLOAD_RATE_LIMIT_WINDOW_MS: z.string().transform(Number).default('3600000'), // 1 hour
+  UPLOAD_RATE_LIMIT_MAX: z.string().transform(Number).default('10'), // 10 uploads per hour
 
   // File Upload
   MAX_FILE_SIZE_BYTES: z.string().transform(Number).default('5368709120'),
@@ -42,8 +45,17 @@ const envSchema = z.object({
   // FFmpeg
   FFMPEG_PATH: z.string().optional(),
 
+  // Telegram Bot
+  TELEGRAM_BOT_TOKEN: z.string().optional(),
+  TELEGRAM_BOT_WEBHOOK_URL: z.string().optional(),
+  TELEGRAM_WEBHOOK_SECRET: z.string().optional(),
+
   // Logging
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+
+  // Payment (Payme)
+  PAYME_MERCHANT_ID: z.string().optional(),
+  PAYME_SECRET_KEY: z.string().optional(),
 });
 
 const parseEnv = () => {
@@ -98,6 +110,10 @@ export const config = {
   rateLimit: {
     windowMs: env.RATE_LIMIT_WINDOW_MS,
     maxRequests: env.RATE_LIMIT_MAX_REQUESTS,
+    upload: {
+      windowMs: env.UPLOAD_RATE_LIMIT_WINDOW_MS,
+      max: env.UPLOAD_RATE_LIMIT_MAX,
+    },
   },
 
   upload: {
@@ -109,8 +125,19 @@ export const config = {
     path: env.FFMPEG_PATH,
   },
 
+  telegram: {
+    botToken: env.TELEGRAM_BOT_TOKEN,
+    botWebhookUrl: env.TELEGRAM_BOT_WEBHOOK_URL,
+    webhookSecret: env.TELEGRAM_WEBHOOK_SECRET,
+  },
+
   logging: {
     level: env.LOG_LEVEL,
+  },
+
+  payme: {
+    merchantId: env.PAYME_MERCHANT_ID,
+    secretKey: env.PAYME_SECRET_KEY,
   },
 } as const;
 

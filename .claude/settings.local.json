@@ -6,7 +6,15 @@
       "Bash(npx tsc:*)",
       "Bash(npm run lint:*)",
       "Bash(npm run typecheck:*)",
-      "Bash(node -e:*)"
+      "Bash(node -e:*)",
+      "Bash(cat:*)",
+      "Bash(findstr:*)",
+      "Bash(where:*)",
+      "Bash(ffmpeg:*)",
+      "Bash(npm i:*)",
+      "Bash(npm uninstall:*)",
+      "Bash(npx drizzle-kit:*)",
+      "Bash(npx tsx:*)"
     ]
   }
 }
