@@ -8,9 +8,6 @@ const router = Router();
 // All upload routes require authentication
 router.use(authenticate);
 
-// Rate limit uploads: 10 per hour per user
-router.use(uploadRateLimiter);
-
 /**
  * TUS Upload Endpoints
  *
@@ -31,9 +28,19 @@ router.use(uploadRateLimiter);
  * - X-Lecture-Id: <lecture uuid>
  */
 
-// Handle all HTTP methods for tus protocol
-// Use wildcard (*) to capture nested paths like /uploads/userId/timestamp-random
-router.all('/', getTusHandler());
-router.all('/*', getTusHandler());
+// Rate limit only POST requests (creating new upload sessions)
+// PATCH requests (chunk uploads) should not count against the limit
+// as they are part of a single upload, not separate uploads
+router.post('/', uploadRateLimiter, getTusHandler());
+router.post('/*', uploadRateLimiter, getTusHandler());
+
+// Handle other HTTP methods for tus protocol without rate limiting
+// HEAD: Get upload status, PATCH: Upload chunks, DELETE: Cancel upload
+router.head('/', getTusHandler());
+router.head('/*', getTusHandler());
+router.patch('/', getTusHandler());
+router.patch('/*', getTusHandler());
+router.delete('/', getTusHandler());
+router.delete('/*', getTusHandler());
 
 export default router;
