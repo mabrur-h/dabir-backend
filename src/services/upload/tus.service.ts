@@ -260,6 +260,20 @@ export function createTusServer(): TusServer {
 let cachedHandler: ((req: Request, res: Response) => Promise<void>) | null = null;
 
 /**
+ * Check if error is the known GCS metadata missing bug
+ * This happens when Cloud Run restarts mid-upload and GCS object metadata is incomplete
+ * See: https://github.com/tus/tus-node-server/issues/521
+ */
+function isGcsMetadataMissingError(error: unknown): boolean {
+  if (error instanceof TypeError) {
+    const message = error.message || '';
+    return message.includes("Cannot destructure property 'size' of 'metadata.metadata'") ||
+           message.includes("Cannot destructure property") && message.includes("metadata");
+  }
+  return false;
+}
+
+/**
  * Express middleware handler for tus uploads
  */
 export function getTusHandler() {
@@ -307,6 +321,28 @@ export function getTusHandler() {
       await server.handle(req, res);
       logger.debug({ method: req.method }, 'TUS server handled request');
     } catch (error) {
+      // Handle the known GCS metadata missing bug gracefully
+      // This occurs when Cloud Run restarts and the upload cannot be resumed
+      // Tell client to start a new upload instead of crashing
+      if (isGcsMetadataMissingError(error)) {
+        logger.warn(
+          { method: req.method, url: req.url },
+          'GCS metadata missing - upload cannot be resumed, client should restart upload'
+        );
+        if (!res.headersSent) {
+          // Return 404 to tell TUS client the upload doesn't exist anymore
+          // This triggers the client to create a new upload
+          res.status(404).json({
+            success: false,
+            error: {
+              code: 'UPLOAD_NOT_FOUND',
+              message: 'Upload session expired or corrupted. Please start a new upload.',
+            },
+          });
+        }
+        return;
+      }
+
       logger.error({ error, method: req.method, url: req.url }, 'TUS handler error');
       if (!res.headersSent) {
         res.status(500).json({
