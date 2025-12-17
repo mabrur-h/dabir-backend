@@ -132,7 +132,9 @@ async function processAudioExtraction(
       durationSeconds: result.durationSeconds,
     };
   } catch (error) {
-    logger.error({ error, jobId: job.id, lectureId }, 'Audio extraction failed');
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    logger.error({ errorMessage, errorStack, jobId: job.id, lectureId }, 'Audio extraction failed');
 
     // Update lecture status to failed
     await lectureService.updateLectureStatus(
@@ -236,7 +238,9 @@ export function createAudioExtractionWorker(): Worker<AudioExtractionJobData> {
   });
 
   worker.on('error', (error) => {
-    logger.error({ error }, 'Audio extraction worker error');
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    logger.error({ errorMessage, errorStack }, 'Audio extraction worker error');
   });
 
   worker.on('stalled', async (jobId) => {

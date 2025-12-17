@@ -183,8 +183,15 @@ export async function extractAudioFromGcs(
 
   try {
     // Download file from GCS
-    logger.info({ lectureId, gcsUri }, 'Downloading file from GCS');
-    await gcsService.downloadToFile(gcsPath, tempInputPath);
+    logger.info({ lectureId, gcsUri, gcsPath, tempInputPath }, 'Downloading file from GCS');
+    try {
+      await gcsService.downloadToFile(gcsPath, tempInputPath);
+      logger.info({ lectureId, tempInputPath }, 'File downloaded successfully');
+    } catch (downloadError) {
+      const errorMessage = downloadError instanceof Error ? downloadError.message : String(downloadError);
+      logger.error({ lectureId, gcsPath, errorMessage }, 'Failed to download file from GCS');
+      throw new Error(`GCS download failed: ${errorMessage}`);
+    }
 
     // Get media info
     const mediaInfo = await getMediaInfo(tempInputPath);

@@ -156,6 +156,8 @@ steps:
     waitFor: ['run-seed']
 
   # Deploy Worker to Cloud Run
+  # Workers need CPU always allocated since they process background jobs
+  # --no-cpu-throttling ensures CPU isn't throttled when not handling requests
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
     args:
@@ -172,7 +174,7 @@ steps:
       - '--service-account'
       - '${_SERVICE_ACCOUNT}'
       - '--memory'
-      - '1Gi'
+      - '2Gi'
       - '--cpu'
       - '2'
       - '--min-instances'
@@ -181,6 +183,7 @@ steps:
       - '5'
       - '--timeout'
       - '3600'
+      - '--no-cpu-throttling'
       - '--add-cloudsql-instances'
       - '$PROJECT_ID:${_REGION}:${_DB_INSTANCE}'
       - '--vpc-connector'
