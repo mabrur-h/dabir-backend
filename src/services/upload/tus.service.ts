@@ -274,6 +274,63 @@ function isGcsMetadataMissingError(error: unknown): boolean {
 }
 
 /**
+ * Safely handle TUS errors and send appropriate response
+ */
+function handleTusError(error: unknown, req: Request, res: Response): void {
+  // Handle the known GCS metadata missing bug gracefully
+  // This occurs when Cloud Run restarts and the upload cannot be resumed
+  // Tell client to start a new upload instead of crashing
+  if (isGcsMetadataMissingError(error)) {
+    logger.warn(
+      { method: req.method, url: req.url },
+      'GCS metadata missing - upload cannot be resumed, client should restart upload'
+    );
+    if (!res.headersSent) {
+      // Return 404 to tell TUS client the upload doesn't exist anymore
+      // This triggers the client to create a new upload
+      res.status(404).json({
+        success: false,
+        error: {
+          code: 'UPLOAD_NOT_FOUND',
+          message: 'Upload session expired or corrupted. Please start a new upload.',
+        },
+      });
+    }
+    return;
+  }
+
+  // Handle GCS "not found" errors (file was deleted or never fully uploaded)
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  if (errorMessage.includes('No such object') || errorMessage.includes('404')) {
+    logger.warn(
+      { method: req.method, url: req.url, error: errorMessage },
+      'GCS object not found - upload cannot be resumed'
+    );
+    if (!res.headersSent) {
+      res.status(404).json({
+        success: false,
+        error: {
+          code: 'UPLOAD_NOT_FOUND',
+          message: 'Upload not found. Please start a new upload.',
+        },
+      });
+    }
+    return;
+  }
+
+  logger.error({ error, method: req.method, url: req.url }, 'TUS handler error');
+  if (!res.headersSent) {
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'UPLOAD_ERROR',
+        message: 'Upload processing failed',
+      },
+    });
+  }
+}
+
+/**
  * Express middleware handler for tus uploads
  */
 export function getTusHandler() {
@@ -316,43 +373,16 @@ export function getTusHandler() {
         }
       }
 
-      // Handle the request
+      // Handle the request with Promise wrapper to catch sync errors from TUS
       logger.debug({ method: req.method }, 'Passing to TUS server');
-      await server.handle(req, res);
+
+      await Promise.resolve(server.handle(req, res)).catch((error) => {
+        handleTusError(error, req, res);
+      });
+
       logger.debug({ method: req.method }, 'TUS server handled request');
     } catch (error) {
-      // Handle the known GCS metadata missing bug gracefully
-      // This occurs when Cloud Run restarts and the upload cannot be resumed
-      // Tell client to start a new upload instead of crashing
-      if (isGcsMetadataMissingError(error)) {
-        logger.warn(
-          { method: req.method, url: req.url },
-          'GCS metadata missing - upload cannot be resumed, client should restart upload'
-        );
-        if (!res.headersSent) {
-          // Return 404 to tell TUS client the upload doesn't exist anymore
-          // This triggers the client to create a new upload
-          res.status(404).json({
-            success: false,
-            error: {
-              code: 'UPLOAD_NOT_FOUND',
-              message: 'Upload session expired or corrupted. Please start a new upload.',
-            },
-          });
-        }
-        return;
-      }
-
-      logger.error({ error, method: req.method, url: req.url }, 'TUS handler error');
-      if (!res.headersSent) {
-        res.status(500).json({
-          success: false,
-          error: {
-            code: 'UPLOAD_ERROR',
-            message: 'Upload processing failed',
-          },
-        });
-      }
+      handleTusError(error, req, res);
     }
   };
 
