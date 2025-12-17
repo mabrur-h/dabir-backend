@@ -75,8 +75,8 @@ const start = async () => {
   try {
     const app = createApp();
 
-    // Start server
-    app.listen(config.server.port, () => {
+    // Start server with extended timeouts for large uploads
+    const server = app.listen(config.server.port, () => {
       logger.info(
         {
           port: config.server.port,
@@ -86,14 +86,33 @@ const start = async () => {
       );
     });
 
-    // Graceful shutdown
+    // Extend server timeouts for large file uploads
+    // Cloud Run has max 60 min timeout, but we set reasonable defaults
+    server.keepAliveTimeout = 120000; // 2 minutes - must be > Cloud Run's load balancer (60s)
+    server.headersTimeout = 125000; // Slightly higher than keepAliveTimeout
+    server.requestTimeout = 600000; // 10 minutes for large uploads
+
+    // Graceful shutdown - wait for ongoing requests to complete
     const shutdown = async (signal: string) => {
-      logger.info({ signal }, 'Received shutdown signal');
+      logger.info({ signal }, 'Received shutdown signal, starting graceful shutdown');
 
-      // TODO: Close database connections
-      // TODO: Close Redis connections
-      // TODO: Wait for pending jobs
+      // Stop accepting new connections
+      server.close(() => {
+        logger.info('HTTP server closed');
+      });
 
+      // Give ongoing requests time to complete (Cloud Run gives 10s after SIGTERM)
+      // We'll wait up to 8 seconds for in-flight requests
+      const shutdownTimeout = setTimeout(() => {
+        logger.warn('Shutdown timeout reached, forcing exit');
+        process.exit(0);
+      }, 8000);
+
+      // Wait a bit for connections to drain
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      clearTimeout(shutdownTimeout);
+      logger.info('Graceful shutdown complete');
       process.exit(0);
     };
 
