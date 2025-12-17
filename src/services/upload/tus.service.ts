@@ -11,6 +11,57 @@ import { getFileMd5Hash, deleteFile } from './gcs.service.js';
 const logger = createLogger('tus-service');
 
 // ============================================
+// SAFE GCS STORE WRAPPER
+// ============================================
+
+/**
+ * Custom error class for upload not found scenarios
+ */
+class UploadNotFoundError extends Error {
+  status_code = 404;
+  body = 'Upload not found or expired';
+
+  constructor(uploadId: string) {
+    super(`Upload not found: ${uploadId}`);
+    this.name = 'UploadNotFoundError';
+  }
+}
+
+/**
+ * Wrapper around GCSStore that safely handles the metadata.metadata bug
+ *
+ * The @tus/gcs-store library crashes when trying to read upload info
+ * for files that were partially uploaded or whose metadata is corrupted.
+ * This wrapper catches those errors and converts them to proper 404 responses.
+ *
+ * Bug: https://github.com/tus/tus-node-server/issues/521
+ */
+class SafeGCSStore extends GCSStore {
+  override async getUpload(id: string): Promise<Upload> {
+    try {
+      return await super.getUpload(id);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Handle the known metadata.metadata destructuring bug
+      if (errorMessage.includes("Cannot destructure property 'size' of 'metadata.metadata'")) {
+        logger.warn({ uploadId: id }, 'GCS metadata corrupted, treating as not found');
+        throw new UploadNotFoundError(id);
+      }
+
+      // Handle GCS "No such object" errors
+      if (errorMessage.includes('No such object') || errorMessage.includes('404')) {
+        logger.warn({ uploadId: id, error: errorMessage }, 'GCS object not found');
+        throw new UploadNotFoundError(id);
+      }
+
+      // Re-throw other errors
+      throw error;
+    }
+  }
+}
+
+// ============================================
 // TUS SERVER SETUP
 // ============================================
 
@@ -21,14 +72,13 @@ export function createTusServer(): TusServer {
     return tusServer;
   }
 
-  // Create GCS store for tus
-  // GCSStore expects a Bucket instance, not bucket name
+  // Create GCS store for tus with our safe wrapper
   const storage = new Storage({
     projectId: config.gcp.projectId,
     keyFilename: config.gcp.credentials,
   });
   const bucket = storage.bucket(config.gcp.bucketName);
-  const store = new GCSStore({ bucket });
+  const store = new SafeGCSStore({ bucket });
 
   tusServer = new TusServer({
     path: '/api/v1/uploads',
