@@ -91,6 +91,49 @@ export function createTusServer(): TusServer {
       return `${proto}://${host}${path}/${id}`;
     },
 
+    // Intercept errors before they're sent to the client
+    // This allows us to convert cryptic GCS errors into clear, actionable responses
+    onResponseError: async (_req, _res, error) => {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Check if this is a session-related error that should trigger client restart
+      if (isSessionExpiredError(error)) {
+        logger.warn({ error: errorMessage }, 'Converting session error to UPLOAD_NOT_FOUND');
+        // Return a TUS-compatible error that signals session expiration
+        return {
+          status_code: 404,
+          body: JSON.stringify({
+            success: false,
+            error: {
+              code: 'UPLOAD_NOT_FOUND',
+              message: 'Upload session expired or corrupted. Please start a new upload.',
+            },
+          }),
+        };
+      }
+
+      // Log and convert other errors to TUS-compatible format
+      logger.warn({ error: errorMessage }, 'TUS response error');
+
+      // If error already has status_code and body, pass it through
+      const tusError = error as { status_code?: number; body?: string };
+      if (tusError.status_code && tusError.body) {
+        return { status_code: tusError.status_code, body: tusError.body };
+      }
+
+      // Convert generic errors to 500 response
+      return {
+        status_code: 500,
+        body: JSON.stringify({
+          success: false,
+          error: {
+            code: 'UPLOAD_ERROR',
+            message: 'Something went wrong. Please retry.',
+          },
+        }),
+      };
+    },
+
     // Extract metadata from upload
     // This returns the GCS object path (which also becomes the upload ID in URLs)
     // NOTE: The returned ID should NOT include 'uploads/' prefix since the route is already at /api/v1/uploads
@@ -310,78 +353,107 @@ export function createTusServer(): TusServer {
 let cachedHandler: ((req: Request, res: Response) => Promise<void>) | null = null;
 
 /**
- * Check if error is the known GCS metadata missing bug
+ * Patterns that indicate the upload session has expired or is corrupted
+ * These errors should be converted to 404 responses to tell the client to restart
+ */
+const SESSION_EXPIRED_PATTERNS = [
+  "Cannot destructure property 'size' of 'metadata.metadata'",
+  "Cannot destructure property",
+  "metadata",
+  "No such object",
+  "not found",
+  "does not exist",
+  "expired",
+  "corrupted",
+  "Something went wrong",
+  "invalid upload",
+  "ENOENT",
+  "404",
+];
+
+/**
+ * Check if error indicates the upload session has expired or is corrupted
  * This happens when Cloud Run restarts mid-upload and GCS object metadata is incomplete
  * See: https://github.com/tus/tus-node-server/issues/521
  */
-function isGcsMetadataMissingError(error: unknown): boolean {
-  // Get the error message regardless of error type
+function isSessionExpiredError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
+  const lowerMessage = message.toLowerCase();
 
-  // Check for the specific metadata destructuring error
-  if (message.includes("Cannot destructure property 'size' of 'metadata.metadata'")) {
-    return true;
+  return SESSION_EXPIRED_PATTERNS.some(pattern =>
+    lowerMessage.includes(pattern.toLowerCase())
+  );
+}
+
+/**
+ * Send a standardized session expired response
+ * This tells the client to restart the upload from scratch
+ */
+function sendSessionExpiredResponse(res: Response, message?: string): void {
+  if (!res.headersSent) {
+    res.status(404).json({
+      success: false,
+      error: {
+        code: 'UPLOAD_NOT_FOUND',
+        message: message || 'Upload session expired or corrupted. Please start a new upload.',
+      },
+    });
   }
-
-  // Also check for other metadata-related destructuring errors
-  if (message.includes("Cannot destructure property") && message.includes("metadata")) {
-    return true;
-  }
-
-  // Check for "undefined" errors related to metadata
-  if (message.includes("metadata") && message.includes("undefined")) {
-    return true;
-  }
-
-  return false;
 }
 
 /**
  * Safely handle TUS errors and send appropriate response
+ * IMPORTANT: All session-related errors return 404 with UPLOAD_NOT_FOUND
+ * This allows the client to detect and automatically restart the upload
  */
 function handleTusError(error: unknown, req: Request, res: Response): void {
-  // Handle the known GCS metadata missing bug gracefully
-  // This occurs when Cloud Run restarts and the upload cannot be resumed
-  // Tell client to start a new upload instead of crashing
-  if (isGcsMetadataMissingError(error)) {
-    logger.warn(
-      { method: req.method, url: req.url },
-      'GCS metadata missing - upload cannot be resumed, client should restart upload'
-    );
-    if (!res.headersSent) {
-      // Return 404 to tell TUS client the upload doesn't exist anymore
-      // This triggers the client to create a new upload
-      res.status(404).json({
-        success: false,
-        error: {
-          code: 'UPLOAD_NOT_FOUND',
-          message: 'Upload session expired or corrupted. Please start a new upload.',
-        },
-      });
-    }
-    return;
-  }
-
-  // Handle GCS "not found" errors (file was deleted or never fully uploaded)
   const errorMessage = error instanceof Error ? error.message : String(error);
-  if (errorMessage.includes('No such object') || errorMessage.includes('404')) {
+
+  // Check if this is a session expired/corrupted error
+  // These should all return 404 to signal client to restart
+  if (isSessionExpiredError(error)) {
     logger.warn(
       { method: req.method, url: req.url, error: errorMessage },
-      'GCS object not found - upload cannot be resumed'
+      'Upload session expired or corrupted - client should restart upload'
+    );
+    sendSessionExpiredResponse(res);
+    return;
+  }
+
+  // Check if the error object has a status code (TUS library errors)
+  const errorWithStatus = error as { status_code?: number; body?: string };
+  if (errorWithStatus.status_code === 404) {
+    logger.warn(
+      { method: req.method, url: req.url },
+      'Upload not found (404 from TUS)'
+    );
+    sendSessionExpiredResponse(res);
+    return;
+  }
+
+  // For any other 5xx errors during PATCH (chunk upload), treat as potentially recoverable
+  // but still provide a clear error code for the client
+  if (req.method === 'PATCH') {
+    logger.error(
+      { error: errorMessage, method: req.method, url: req.url },
+      'Error during chunk upload'
     );
     if (!res.headersSent) {
-      res.status(404).json({
+      // Return 500 but with a clear error structure that client can parse
+      res.status(500).json({
         success: false,
         error: {
-          code: 'UPLOAD_NOT_FOUND',
-          message: 'Upload not found. Please start a new upload.',
+          code: 'CHUNK_UPLOAD_ERROR',
+          message: 'Something went wrong receiving the file. Please retry.',
+          retryable: true,
         },
       });
     }
     return;
   }
 
-  logger.error({ error, method: req.method, url: req.url }, 'TUS handler error');
+  // Generic error handler for other cases
+  logger.error({ error: errorMessage, method: req.method, url: req.url }, 'TUS handler error');
   if (!res.headersSent) {
     res.status(500).json({
       success: false,
