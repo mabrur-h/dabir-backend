@@ -315,11 +315,24 @@ let cachedHandler: ((req: Request, res: Response) => Promise<void>) | null = nul
  * See: https://github.com/tus/tus-node-server/issues/521
  */
 function isGcsMetadataMissingError(error: unknown): boolean {
-  if (error instanceof TypeError) {
-    const message = error.message || '';
-    return message.includes("Cannot destructure property 'size' of 'metadata.metadata'") ||
-           message.includes("Cannot destructure property") && message.includes("metadata");
+  // Get the error message regardless of error type
+  const message = error instanceof Error ? error.message : String(error);
+
+  // Check for the specific metadata destructuring error
+  if (message.includes("Cannot destructure property 'size' of 'metadata.metadata'")) {
+    return true;
   }
+
+  // Also check for other metadata-related destructuring errors
+  if (message.includes("Cannot destructure property") && message.includes("metadata")) {
+    return true;
+  }
+
+  // Check for "undefined" errors related to metadata
+  if (message.includes("metadata") && message.includes("undefined")) {
+    return true;
+  }
+
   return false;
 }
 
