@@ -9,6 +9,17 @@ import type { TranscriptionResult, SummaryResult, CustDevSummaryResult } from '.
 const logger = createLogger('gemini-service');
 
 // ============================================
+// RETRY CONFIGURATION
+// ============================================
+
+const RETRY_CONFIG = {
+  maxRetries: 3,
+  baseDelayMs: 2000,
+  maxDelayMs: 30000,
+  retryableFinishReasons: ['MAX_TOKENS', 'RECITATION', 'OTHER'] as string[],
+};
+
+// ============================================
 // INITIALIZATION
 // ============================================
 
@@ -63,18 +74,19 @@ SEGMENTATSIYA QOIDALARI (MUHIM):
 
 CHIQISH FORMATI (JSON):
 {
-  "fullText": "Tuzatilgan, o'qishga qulay, yaxlit matn.",
   "segments": [
     {
       "startTime": "MM:SS",
       "endTime": "MM:SS",
       "text": "Segment matni...",
-      "speaker": "Speaker 1" 
+      "speaker": "Speaker 1"
     }
   ],
   "detectedLanguage": "uz",
   "confidence": 0.95
 }
+
+MUHIM: "fullText" maydonini QAYTARMANG. Faqat "segments" massivini qaytaring.
 `;
 
 const SUMMARIZATION_PROMPT_LECTURE = `
@@ -226,8 +238,54 @@ Faqat yaroqli JSON chiqaring, boshqa hech qanday izoh yoki tushuntirish yozmang.
 `;
 
 // ============================================
+// RETRY HELPER
+// ============================================
+
+/**
+ * Sleep for a specified duration
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Calculate delay with exponential backoff and jitter
+ */
+function getRetryDelay(attempt: number): number {
+  const delay = Math.min(
+    RETRY_CONFIG.baseDelayMs * Math.pow(2, attempt),
+    RETRY_CONFIG.maxDelayMs
+  );
+  // Add jitter (±25%)
+  const jitter = delay * 0.25 * (Math.random() * 2 - 1);
+  return Math.round(delay + jitter);
+}
+
+/**
+ * Check if the finish reason indicates we should retry
+ */
+function shouldRetryForFinishReason(finishReason: string | undefined): boolean {
+  if (!finishReason) return true; // Unknown state, retry
+  return RETRY_CONFIG.retryableFinishReasons.includes(finishReason);
+}
+
+// ============================================
 // TRANSCRIPTION
 // ============================================
+
+/**
+ * Raw transcription result from Gemini (without fullText)
+ */
+interface GeminiTranscriptionResponse {
+  segments: Array<{
+    startTime: string;
+    endTime: string;
+    text: string;
+    speaker?: string;
+  }>;
+  detectedLanguage?: string;
+  confidence?: number;
+}
 
 export async function transcribeAudio(
   audioGcsUri: string
@@ -237,94 +295,181 @@ export async function transcribeAudio(
   logger.info({ audioGcsUri }, 'Starting transcription with smart segmentation');
   const startTime = Date.now();
 
-  try {
-    // Download audio from GCS and convert to base64 for inline sending
-    // Vertex AI needs inline data or a File API upload, not direct GCS URIs
-    const { path: gcsPath } = gcsService.parseGcsUri(audioGcsUri);
-    logger.debug({ gcsPath }, 'Downloading audio for transcription');
+  // Download audio once (reuse across retries)
+  const { path: gcsPath } = gcsService.parseGcsUri(audioGcsUri);
+  logger.debug({ gcsPath }, 'Downloading audio for transcription');
 
-    const audioBuffer = await gcsService.downloadBuffer(gcsPath);
-    const audioBase64 = audioBuffer.toString('base64');
+  const audioBuffer = await gcsService.downloadBuffer(gcsPath);
+  const audioBase64 = audioBuffer.toString('base64');
 
-    logger.debug({ audioSizeBytes: audioBuffer.length }, 'Audio downloaded, sending to Gemini');
+  logger.debug({ audioSizeBytes: audioBuffer.length }, 'Audio downloaded, sending to Gemini');
 
-    // Create audio part with inline base64 data
-    const audioPart: Part = {
-      inlineData: {
-        mimeType: 'audio/mpeg',
-        data: audioBase64,
-      },
-    };
+  // Create audio part with inline base64 data
+  const audioPart: Part = {
+    inlineData: {
+      mimeType: 'audio/mpeg',
+      data: audioBase64,
+    },
+  };
 
-    const textPart: Part = {
-      text: TRANSCRIPTION_PROMPT,
-    };
+  const textPart: Part = {
+    text: TRANSCRIPTION_PROMPT,
+  };
 
-    const result = await genModel.generateContent({
-      contents: [
-        {
-          role: 'user',
-          parts: [audioPart, textPart],
-        },
-      ],
-      generationConfig: {
-        temperature: 0.2, // Low temperature for factual accuracy
-        maxOutputTokens: 65536, // Max allowed by Gemini
-        responseMimeType: 'application/json', // Force JSON output mode (Best Practice)
-      },
-    });
+  let lastError: Error | null = null;
 
-    const response = result.response;
-    const text = response.candidates?.[0]?.content?.parts?.[0]?.text;
-
-    if (!text) {
-      throw new Error('No response from Gemini');
-    }
-
-    // Parse JSON response with repair for truncated responses
-    let parsed: TranscriptionResult;
+  // Retry loop
+  for (let attempt = 0; attempt < RETRY_CONFIG.maxRetries; attempt++) {
     try {
-      parsed = JSON.parse(text) as TranscriptionResult;
-    } catch (parseError) {
-      logger.warn({ parseError: parseError instanceof Error ? parseError.message : String(parseError) }, 'JSON parse failed, attempting repair');
-      parsed = repairAndParseJSON(text) as TranscriptionResult;
+      if (attempt > 0) {
+        const delay = getRetryDelay(attempt - 1);
+        logger.info({ attempt, delayMs: delay }, 'Retrying transcription after delay');
+        await sleep(delay);
+      }
+
+      // Use streaming to get response
+      const streamResult = await genModel.generateContentStream({
+        contents: [
+          {
+            role: 'user',
+            parts: [audioPart, textPart],
+          },
+        ],
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 65536,
+          responseMimeType: 'application/json',
+        },
+      });
+
+      // Await the full response
+      const response = await streamResult.response;
+      const candidate = response.candidates?.[0];
+      const finishReason = candidate?.finishReason as string | undefined;
+      const text = candidate?.content?.parts?.[0]?.text;
+
+      logger.debug({ finishReason, textLength: text?.length }, 'Gemini response received');
+
+      // Check finish reason
+      if (finishReason && finishReason !== 'STOP') {
+        logger.warn({ finishReason, attempt }, 'Gemini finished with non-STOP reason');
+
+        if (shouldRetryForFinishReason(finishReason) && attempt < RETRY_CONFIG.maxRetries - 1) {
+          lastError = new Error(`Gemini finished with reason: ${finishReason}`);
+          continue; // Retry
+        }
+
+        // If SAFETY or BLOCKED, don't retry - throw immediately
+        if (finishReason === 'SAFETY' || finishReason === 'BLOCKED') {
+          throw new Error(`Transcription blocked by Gemini safety filters: ${finishReason}`);
+        }
+      }
+
+      if (!text) {
+        lastError = new Error('No response text from Gemini');
+        if (attempt < RETRY_CONFIG.maxRetries - 1) continue;
+        throw lastError;
+      }
+
+      // Parse JSON response with repair for truncated responses
+      let parsed: GeminiTranscriptionResponse;
+      try {
+        parsed = JSON.parse(text) as GeminiTranscriptionResponse;
+      } catch (parseError) {
+        logger.warn({
+          parseError: parseError instanceof Error ? parseError.message : String(parseError),
+          attempt
+        }, 'JSON parse failed, attempting repair');
+
+        try {
+          parsed = repairAndParseJSON(text) as GeminiTranscriptionResponse;
+        } catch (repairError) {
+          // If repair fails and we have retries left, try again
+          if (attempt < RETRY_CONFIG.maxRetries - 1) {
+            lastError = repairError instanceof Error ? repairError : new Error(String(repairError));
+            continue;
+          }
+          throw repairError;
+        }
+      }
+
+      // Validate we have segments
+      if (!parsed.segments || !Array.isArray(parsed.segments) || parsed.segments.length === 0) {
+        lastError = new Error('No segments in transcription response');
+        if (attempt < RETRY_CONFIG.maxRetries - 1) continue;
+        throw lastError;
+      }
+
+      // Convert time strings to milliseconds and ensure structure
+      const segments = parsed.segments.map((seg, index) => ({
+        ...seg,
+        startTimeMs: timeStringToMs(seg.startTime),
+        endTimeMs: timeStringToMs(seg.endTime),
+        index,
+      }));
+
+      // Reconstruct fullText from segments (saves ~30-40% output tokens)
+      const fullText = segments.map(seg => seg.text).join(' ');
+
+      const processingTimeMs = Date.now() - startTime;
+
+      logger.info(
+        {
+          audioGcsUri,
+          segmentCount: segments.length,
+          fullTextLength: fullText.length,
+          processingTimeMs,
+          attempts: attempt + 1,
+          finishReason,
+        },
+        'Transcription completed'
+      );
+
+      return {
+        fullText,
+        segments,
+        detectedLanguage: parsed.detectedLanguage || 'uz',
+        confidence: parsed.confidence || 0.9,
+      };
+
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      // Don't retry on certain errors
+      const errorMessage = lastError.message.toLowerCase();
+      if (
+        errorMessage.includes('safety') ||
+        errorMessage.includes('blocked') ||
+        errorMessage.includes('invalid') ||
+        errorMessage.includes('not found')
+      ) {
+        logger.error({ errorMessage: lastError.message, audioGcsUri }, 'Non-retryable transcription error');
+        throw lastError;
+      }
+
+      logger.warn({
+        attempt,
+        errorMessage: lastError.message,
+        maxRetries: RETRY_CONFIG.maxRetries
+      }, 'Transcription attempt failed');
+
+      if (attempt >= RETRY_CONFIG.maxRetries - 1) {
+        break;
+      }
     }
-
-    // Convert time strings to milliseconds and ensure structure
-    const segments = parsed.segments.map((seg, index) => ({
-      ...seg,
-      startTimeMs: timeStringToMs(seg.startTime),
-      endTimeMs: timeStringToMs(seg.endTime),
-      index,
-    }));
-
-    const processingTimeMs = Date.now() - startTime;
-
-    logger.info(
-      {
-        audioGcsUri,
-        segmentCount: segments.length,
-        processingTimeMs,
-      },
-      'Transcription completed'
-    );
-
-    return {
-      fullText: parsed.fullText,
-      segments: segments,
-      detectedLanguage: 'uz', // Defaulting to uz as requested, or use parsed.detectedLanguage
-      confidence: parsed.confidence || 0.9,
-    };
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    const errorStack = error instanceof Error ? error.stack : undefined;
-    logger.error({
-      errorMessage,
-      errorStack,
-      audioGcsUri
-    }, 'Transcription failed');
-    throw error;
   }
+
+  // All retries exhausted
+  const errorMessage = lastError?.message || 'Unknown transcription error';
+  const errorStack = lastError?.stack;
+  logger.error({
+    errorMessage,
+    errorStack,
+    audioGcsUri,
+    attempts: RETRY_CONFIG.maxRetries
+  }, 'Transcription failed after all retries');
+
+  throw lastError || new Error('Transcription failed after all retries');
 }
 
 // ============================================
