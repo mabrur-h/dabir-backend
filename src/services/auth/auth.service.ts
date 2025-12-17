@@ -178,7 +178,7 @@ async function createTokens(user: {
   };
 }
 
-function formatUserResponse(user: typeof schema.users.$inferSelect): UserResponse {
+export function formatUserResponse(user: typeof schema.users.$inferSelect): UserResponse {
   return {
     id: user.id,
     email: user.email,

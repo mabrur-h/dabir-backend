@@ -38,6 +38,9 @@ COPY --from=builder /app/dist ./dist
 # Copy drizzle migrations
 COPY --from=builder /app/drizzle ./drizzle
 
+# Copy public assets (images, etc.)
+COPY --from=builder /app/public ./public
+
 # Set environment
 ENV NODE_ENV=production
 

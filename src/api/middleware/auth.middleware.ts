@@ -1,19 +1,22 @@
 import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import { eq } from 'drizzle-orm';
 import { config } from '../../config/index.js';
 import { UnauthorizedError } from '../../utils/errors.js';
 import type { AuthenticatedRequest } from '../../types/index.js';
 import type { JwtPayload } from '../../services/auth/auth.service.js';
+import { db, schema } from '../../db/index.js';
 
 /**
  * Middleware to authenticate requests using JWT
  * Extracts token from Authorization header (Bearer token)
+ * Also verifies that the user still exists in the database
  */
-export const authenticate = (
+export const authenticate = async (
   req: Request,
   _res: Response,
   next: NextFunction
-): void => {
+): Promise<void> => {
   try {
     const authHeader = req.headers.authorization;
 
@@ -39,10 +42,20 @@ export const authenticate = (
     // Verify token
     const decoded = jwt.verify(token, config.jwt.secret) as JwtPayload;
 
+    // Verify user still exists in database (handles deleted users after account merge)
+    const user = await db.query.users.findFirst({
+      where: eq(schema.users.id, decoded.userId),
+      columns: { id: true, email: true },
+    });
+
+    if (!user) {
+      throw new UnauthorizedError('User no longer exists', 'USER_NOT_FOUND');
+    }
+
     // Attach user to request
     (req as AuthenticatedRequest).user = {
-      id: decoded.userId,
-      email: decoded.email ?? '',
+      id: user.id,
+      email: user.email ?? '',
     };
 
     next();

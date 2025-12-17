@@ -1,8 +1,10 @@
 import type { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import * as authService from '../../services/auth/auth.service.js';
+import * as accountLinkingService from '../../services/auth/accountLinking.service.js';
 import type { AuthenticatedRequest } from '../../types/index.js';
 import type { TelegramWebAppRequest } from '../middleware/telegramAuth.middleware.js';
+import { config } from '../../config/index.js';
 
 // ============================================
 // VALIDATION SCHEMAS
@@ -316,6 +318,270 @@ export async function telegramWebAppAuth(
         user: result.user,
         tokens: result.tokens,
         isNewUser: result.isNewUser,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// ============================================
+// ACCOUNT LINKING VALIDATION SCHEMAS
+// ============================================
+
+export const completeTelegramLinkSchema = z.object({
+  token: z.string().min(1, 'Link token is required'),
+  telegramId: z.number().int().positive('Invalid Telegram ID'),
+  username: z.string().optional(),
+  firstName: z.string().optional(),
+  lastName: z.string().optional(),
+  languageCode: z.string().optional(),
+  isPremium: z.boolean().optional(),
+  photoUrl: z.string().url().optional().nullable(),
+});
+
+export const completeGoogleLinkSchema = z.object({
+  token: z.string().min(1, 'Link token is required'),
+  idToken: z.string().min(1, 'Google ID token is required'),
+});
+
+// ============================================
+// ACCOUNT LINKING CONTROLLERS
+// ============================================
+
+/**
+ * GET /auth/link/status
+ * Get linked accounts status for current user
+ * Requires authentication
+ */
+export async function getLinkedAccountsStatus(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { user } = req as AuthenticatedRequest;
+    const status = await accountLinkingService.getLinkedAccountsStatus(user.id);
+
+    res.json({
+      success: true,
+      data: status,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * POST /auth/link/telegram/init
+ * Initialize Telegram linking for Google-authenticated user
+ * Returns a deep link URL to open Telegram bot
+ * Requires authentication
+ */
+export async function initTelegramLink(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { user } = req as AuthenticatedRequest;
+
+    // Get bot username from config or use default
+    const botUsername = process.env.TELEGRAM_BOT_USERNAME || 'dabirbot';
+
+    const result = await accountLinkingService.initTelegramLink(user.id, botUsername);
+
+    res.json({
+      success: true,
+      data: {
+        token: result.token,
+        deepLink: result.deepLink,
+        expiresIn: 300, // 5 minutes
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * POST /auth/link/telegram/complete
+ * Complete Telegram linking (called by bot)
+ * This is a server-to-server endpoint called by the Telegram bot
+ */
+export async function completeTelegramLink(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const input = completeTelegramLinkSchema.parse(req.body);
+
+    const result = await accountLinkingService.completeTelegramLink(input.token, {
+      telegramId: input.telegramId,
+      username: input.username,
+      firstName: input.firstName,
+      lastName: input.lastName,
+      languageCode: input.languageCode,
+      isPremium: input.isPremium,
+      photoUrl: input.photoUrl ?? undefined,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        user: result.user,
+        merged: result.merged,
+        message: result.merged
+          ? 'Accounts merged successfully. All your data has been combined.'
+          : 'Telegram account linked successfully.',
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * POST /auth/link/google/init
+ * Initialize Google linking for Telegram-authenticated user
+ * Returns a token to pass through Google OAuth flow
+ * Requires authentication
+ */
+export async function initGoogleLink(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { user } = req as AuthenticatedRequest;
+    const result = await accountLinkingService.initGoogleLink(user.id);
+
+    res.json({
+      success: true,
+      data: {
+        token: result.token,
+        expiresIn: 300, // 5 minutes
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * POST /auth/link/google/complete
+ * Complete Google linking after OAuth
+ * Requires the link token and Google ID token
+ */
+export async function completeGoogleLink(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const input = completeGoogleLinkSchema.parse(req.body);
+
+    // Verify Google ID token
+    const { OAuth2Client } = await import('google-auth-library');
+    const googleClient = new OAuth2Client(config.google.clientId);
+
+    let googlePayload;
+    try {
+      const ticket = await googleClient.verifyIdToken({
+        idToken: input.idToken,
+        audience: config.google.clientId,
+      });
+      googlePayload = ticket.getPayload();
+    } catch {
+      res.status(401).json({
+        success: false,
+        error: {
+          code: 'INVALID_GOOGLE_TOKEN',
+          message: 'Invalid Google ID token',
+        },
+      });
+      return;
+    }
+
+    if (!googlePayload?.sub) {
+      res.status(401).json({
+        success: false,
+        error: {
+          code: 'INVALID_GOOGLE_TOKEN',
+          message: 'Invalid Google ID token payload',
+        },
+      });
+      return;
+    }
+
+    const result = await accountLinkingService.completeGoogleLink(input.token, {
+      googleId: googlePayload.sub,
+      email: googlePayload.email,
+      name: googlePayload.name,
+      picture: googlePayload.picture,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        user: result.user,
+        merged: result.merged,
+        message: result.merged
+          ? 'Accounts merged successfully. All your data has been combined.'
+          : 'Google account linked successfully.',
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * POST /auth/unlink/google
+ * Unlink Google account from current user
+ * Requires authentication and Telegram to be linked
+ */
+export async function unlinkGoogle(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { user } = req as AuthenticatedRequest;
+    const updatedUser = await accountLinkingService.unlinkGoogle(user.id);
+
+    res.json({
+      success: true,
+      data: {
+        user: updatedUser,
+        message: 'Google account unlinked successfully.',
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * POST /auth/unlink/telegram
+ * Unlink Telegram account from current user
+ * Requires authentication and Google to be linked
+ */
+export async function unlinkTelegram(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { user } = req as AuthenticatedRequest;
+    const updatedUser = await accountLinkingService.unlinkTelegram(user.id);
+
+    res.json({
+      success: true,
+      data: {
+        user: updatedUser,
+        message: 'Telegram account unlinked successfully.',
       },
     });
   } catch (error) {
