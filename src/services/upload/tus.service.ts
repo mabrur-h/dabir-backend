@@ -1,5 +1,4 @@
 import { Server as TusServer, Upload } from '@tus/server';
-import { GCSStore } from '@tus/gcs-store';
 import { Storage } from '@google-cloud/storage';
 import type { Request, Response } from 'express';
 import { config } from '../../config/index.js';
@@ -7,78 +6,37 @@ import { createLogger } from '../../utils/logger.js';
 import * as lectureService from '../lecture/lecture.service.js';
 import { addAudioExtractionJob } from '../queue/queue.service.js';
 import { getFileMd5Hash, deleteFile } from './gcs.service.js';
+import { MemoryGCSStore, createRedisClient } from './memory-gcs-store.js';
 
 const logger = createLogger('tus-service');
-
-// ============================================
-// SAFE GCS STORE WRAPPER
-// ============================================
-
-/**
- * Custom error class for upload not found scenarios
- */
-class UploadNotFoundError extends Error {
-  status_code = 404;
-  body = 'Upload not found or expired';
-
-  constructor(uploadId: string) {
-    super(`Upload not found: ${uploadId}`);
-    this.name = 'UploadNotFoundError';
-  }
-}
-
-/**
- * Wrapper around GCSStore that safely handles the metadata.metadata bug
- *
- * The @tus/gcs-store library crashes when trying to read upload info
- * for files that were partially uploaded or whose metadata is corrupted.
- * This wrapper catches those errors and converts them to proper 404 responses.
- *
- * Bug: https://github.com/tus/tus-node-server/issues/521
- */
-class SafeGCSStore extends GCSStore {
-  override async getUpload(id: string): Promise<Upload> {
-    try {
-      return await super.getUpload(id);
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-
-      // Handle the known metadata.metadata destructuring bug
-      if (errorMessage.includes("Cannot destructure property 'size' of 'metadata.metadata'")) {
-        logger.warn({ uploadId: id }, 'GCS metadata corrupted, treating as not found');
-        throw new UploadNotFoundError(id);
-      }
-
-      // Handle GCS "No such object" errors
-      if (errorMessage.includes('No such object') || errorMessage.includes('404')) {
-        logger.warn({ uploadId: id, error: errorMessage }, 'GCS object not found');
-        throw new UploadNotFoundError(id);
-      }
-
-      // Re-throw other errors
-      throw error;
-    }
-  }
-}
 
 // ============================================
 // TUS SERVER SETUP
 // ============================================
 
 let tusServer: TusServer;
+let redisClient: ReturnType<typeof createRedisClient> | null = null;
 
 export function createTusServer(): TusServer {
   if (tusServer) {
     return tusServer;
   }
 
-  // Create GCS store for tus with our safe wrapper
+  // Create Redis client for upload state tracking
+  if (!redisClient) {
+    redisClient = createRedisClient();
+  }
+
+  // Create GCS bucket reference
   const storage = new Storage({
     projectId: config.gcp.projectId,
     keyFilename: config.gcp.credentials,
   });
   const bucket = storage.bucket(config.gcp.bucketName);
-  const store = new SafeGCSStore({ bucket });
+
+  // Use our custom store that buffers to temp files and uses Redis for state
+  // This avoids the @tus/gcs-store metadata corruption bugs
+  const store = new MemoryGCSStore({ redis: redisClient, bucket });
 
   tusServer = new TusServer({
     path: '/api/v1/uploads',
@@ -93,13 +51,36 @@ export function createTusServer(): TusServer {
 
     // Intercept errors before they're sent to the client
     // This allows us to convert cryptic GCS errors into clear, actionable responses
-    onResponseError: async (_req, _res, error) => {
+    onResponseError: async (req, _res, error) => {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      const method = req.method || 'UNKNOWN';
 
-      // Check if this is a session-related error that should trigger client restart
+      // Log the error for debugging
+      logger.warn({ error: errorMessage, method }, 'TUS response error');
+
+      // If error already has status_code and body, pass it through
+      const tusError = error as { status_code?: number; body?: string };
+      if (tusError.status_code && tusError.body) {
+        return { status_code: tusError.status_code, body: tusError.body };
+      }
+
+      // For POST (create upload), don't convert to 404 - let the actual error through
+      if (method === 'POST') {
+        return {
+          status_code: 500,
+          body: JSON.stringify({
+            success: false,
+            error: {
+              code: 'UPLOAD_CREATE_ERROR',
+              message: errorMessage || 'Failed to create upload session.',
+            },
+          }),
+        };
+      }
+
+      // For PATCH/HEAD/GET (resume operations), check for session-related errors
       if (isSessionExpiredError(error)) {
-        logger.warn({ error: errorMessage }, 'Converting session error to UPLOAD_NOT_FOUND');
-        // Return a TUS-compatible error that signals session expiration
+        logger.warn({ error: errorMessage, method }, 'Converting session error to UPLOAD_NOT_FOUND');
         return {
           status_code: 404,
           body: JSON.stringify({
@@ -110,15 +91,6 @@ export function createTusServer(): TusServer {
             },
           }),
         };
-      }
-
-      // Log and convert other errors to TUS-compatible format
-      logger.warn({ error: errorMessage }, 'TUS response error');
-
-      // If error already has status_code and body, pass it through
-      const tusError = error as { status_code?: number; body?: string };
-      if (tusError.status_code && tusError.body) {
-        return { status_code: tusError.status_code, body: tusError.body };
       }
 
       // Convert generic errors to 500 response
@@ -355,20 +327,24 @@ let cachedHandler: ((req: Request, res: Response) => Promise<void>) | null = nul
 /**
  * Patterns that indicate the upload session has expired or is corrupted
  * These errors should be converted to 404 responses to tell the client to restart
+ * IMPORTANT: These patterns should be specific enough to avoid false positives
  */
 const SESSION_EXPIRED_PATTERNS = [
+  // GCS store metadata bug
   "Cannot destructure property 'size' of 'metadata.metadata'",
-  "Cannot destructure property",
-  "metadata",
+  "metadata.metadata",
+  // GCS object errors
   "No such object",
-  "not found",
-  "does not exist",
-  "expired",
-  "corrupted",
-  "Something went wrong",
-  "invalid upload",
+  "does not exist in bucket",
+  // Redis/store errors for existing uploads
+  "Upload not found",
+  "upload not found",
+  // Session-specific
+  "session expired",
+  "upload expired",
+  "upload corrupted",
+  // File system errors (temp file deleted)
   "ENOENT",
-  "404",
 ];
 
 /**

@@ -1,4 +1,4 @@
-import { VertexAI, GenerativeModel, Part } from '@google-cloud/vertexai';
+import { VertexAI, GenerativeModel, Part, SchemaType } from '@google-cloud/vertexai';
 import { config } from '../../config/index.js';
 import { createLogger } from '../../utils/logger.js';
 import { timeStringToMs } from '../../utils/time.js';
@@ -287,6 +287,32 @@ interface GeminiTranscriptionResponse {
   confidence?: number;
 }
 
+/**
+ * JSON Schema for transcription response - enforces strict structure
+ * Using SchemaType enum as required by Vertex AI SDK
+ */
+const TRANSCRIPTION_RESPONSE_SCHEMA = {
+  type: SchemaType.OBJECT,
+  properties: {
+    segments: {
+      type: SchemaType.ARRAY,
+      items: {
+        type: SchemaType.OBJECT,
+        properties: {
+          startTime: { type: SchemaType.STRING, description: 'Start time in MM:SS format' },
+          endTime: { type: SchemaType.STRING, description: 'End time in MM:SS format' },
+          text: { type: SchemaType.STRING, description: 'Transcribed text for this segment' },
+          speaker: { type: SchemaType.STRING, description: 'Speaker identifier' },
+        },
+        required: ['startTime', 'endTime', 'text'],
+      },
+    },
+    detectedLanguage: { type: SchemaType.STRING, description: 'Detected language code' },
+    confidence: { type: SchemaType.NUMBER, description: 'Confidence score 0-1' },
+  },
+  required: ['segments'],
+};
+
 export async function transcribeAudio(
   audioGcsUri: string
 ): Promise<TranscriptionResult> {
@@ -327,7 +353,7 @@ export async function transcribeAudio(
         await sleep(delay);
       }
 
-      // Use streaming to get response
+      // Use streaming to get response with strict JSON schema
       const streamResult = await genModel.generateContentStream({
         contents: [
           {
@@ -339,6 +365,7 @@ export async function transcribeAudio(
           temperature: 0.2,
           maxOutputTokens: 65536,
           responseMimeType: 'application/json',
+          responseSchema: TRANSCRIPTION_RESPONSE_SCHEMA,
         },
       });
 
