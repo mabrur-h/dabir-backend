@@ -512,7 +512,128 @@ export async function transcribeAudio(
 // ============================================
 
 /**
+ * JSON Schema for lecture summarization response
+ */
+const LECTURE_SUMMARY_SCHEMA = {
+  type: SchemaType.OBJECT,
+  properties: {
+    overview: { type: SchemaType.STRING, description: 'Executive summary of the lecture' },
+    chapters: {
+      type: SchemaType.ARRAY,
+      items: {
+        type: SchemaType.OBJECT,
+        properties: {
+          index: { type: SchemaType.INTEGER, description: 'Chapter index starting from 1' },
+          title: { type: SchemaType.STRING, description: 'Chapter title' },
+          summary: { type: SchemaType.STRING, description: 'Chapter summary' },
+          startTimeMs: { type: SchemaType.INTEGER, description: 'Start time in milliseconds' },
+          endTimeMs: { type: SchemaType.INTEGER, description: 'End time in milliseconds' },
+        },
+        required: ['index', 'title', 'summary'],
+      },
+    },
+    keyPoints: {
+      type: SchemaType.ARRAY,
+      items: {
+        type: SchemaType.OBJECT,
+        properties: {
+          title: { type: SchemaType.STRING, description: 'Key point title' },
+          description: { type: SchemaType.STRING, description: 'Key point description' },
+          timestampMs: { type: SchemaType.INTEGER, description: 'Timestamp in milliseconds' },
+          importance: { type: SchemaType.INTEGER, description: 'Importance score 1-5' },
+        },
+        required: ['title', 'description'],
+      },
+    },
+  },
+  required: ['overview', 'chapters', 'keyPoints'],
+};
+
+/**
+ * JSON Schema for CustDev summarization response
+ */
+const CUSTDEV_SUMMARY_SCHEMA = {
+  type: SchemaType.OBJECT,
+  properties: {
+    callSummary: {
+      type: SchemaType.OBJECT,
+      properties: {
+        title: { type: SchemaType.STRING },
+        overview: { type: SchemaType.STRING },
+        customerMood: { type: SchemaType.STRING },
+      },
+      required: ['title', 'overview'],
+    },
+    keyPainPoints: {
+      type: SchemaType.ARRAY,
+      items: {
+        type: SchemaType.OBJECT,
+        properties: {
+          painPoint: { type: SchemaType.STRING },
+          impact: { type: SchemaType.STRING },
+          timestampMs: { type: SchemaType.INTEGER },
+        },
+        required: ['painPoint', 'impact'],
+      },
+    },
+    positiveFeedback: {
+      type: SchemaType.ARRAY,
+      items: {
+        type: SchemaType.OBJECT,
+        properties: {
+          feature: { type: SchemaType.STRING },
+          benefit: { type: SchemaType.STRING },
+          timestampMs: { type: SchemaType.INTEGER },
+        },
+        required: ['feature', 'benefit'],
+      },
+    },
+    productSuggestions: {
+      type: SchemaType.ARRAY,
+      items: {
+        type: SchemaType.OBJECT,
+        properties: {
+          type: { type: SchemaType.STRING },
+          priority: { type: SchemaType.STRING },
+          description: { type: SchemaType.STRING },
+          relatedPainPoint: { type: SchemaType.STRING },
+        },
+        required: ['type', 'description'],
+      },
+    },
+    internalActionItems: {
+      type: SchemaType.ARRAY,
+      items: {
+        type: SchemaType.OBJECT,
+        properties: {
+          owner: { type: SchemaType.STRING },
+          action: { type: SchemaType.STRING },
+          timestampMs: { type: SchemaType.INTEGER },
+        },
+        required: ['owner', 'action'],
+      },
+    },
+    mindMap: {
+      type: SchemaType.OBJECT,
+      properties: {
+        centralNode: {
+          type: SchemaType.OBJECT,
+          properties: {
+            label: { type: SchemaType.STRING },
+            description: { type: SchemaType.STRING },
+          },
+        },
+        branches: { type: SchemaType.OBJECT },
+        connections: { type: SchemaType.ARRAY },
+      },
+    },
+  },
+  required: ['callSummary', 'keyPainPoints', 'productSuggestions'],
+};
+
+/**
  * Summarize transcription for lecture type (default)
+ * With retry logic and JSON repair for robustness
  */
 export async function summarizeTranscription(
   transcription: string,
@@ -520,10 +641,14 @@ export async function summarizeTranscription(
 ): Promise<SummaryResult | CustDevSummaryResult> {
   const genModel = getModel();
 
-  // Select prompt based on summarization type
+  // Select prompt and schema based on summarization type
   const promptTemplate = summarizationType === SUMMARIZATION_TYPE.CUSTDEV
     ? SUMMARIZATION_PROMPT_CUSTDEV
     : SUMMARIZATION_PROMPT_LECTURE;
+
+  const responseSchema = summarizationType === SUMMARIZATION_TYPE.CUSTDEV
+    ? CUSTDEV_SUMMARY_SCHEMA
+    : LECTURE_SUMMARY_SCHEMA;
 
   // Insert transcription into the template
   const prompt = promptTemplate.replace('{transcription}', transcription);
@@ -534,67 +659,133 @@ export async function summarizeTranscription(
   );
   const startTime = Date.now();
 
-  try {
-    const result = await genModel.generateContent({
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: prompt }],
+  let lastError: Error | null = null;
+
+  // Retry loop for summarization
+  for (let attempt = 0; attempt < RETRY_CONFIG.maxRetries; attempt++) {
+    try {
+      if (attempt > 0) {
+        const delay = getRetryDelay(attempt - 1);
+        logger.info({ attempt, delayMs: delay, summarizationType }, 'Retrying summarization after delay');
+        await sleep(delay);
+      }
+
+      logger.debug({ attempt, transcriptionLength: transcription.length, summarizationType }, 'Sending summarization request to Gemini');
+
+      const result = await genModel.generateContent({
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: prompt }],
+          },
+        ],
+        generationConfig: {
+          temperature: 0.4,
+          maxOutputTokens: 16384, // Increased for complex CustDev summaries
+          responseMimeType: 'application/json',
+          responseSchema,
         },
-      ],
-      generationConfig: {
-        temperature: 0.4, // Slightly higher for better synthesis and natural language flow
-        maxOutputTokens: 8192,
-        responseMimeType: 'application/json', // Force JSON output mode
-      },
-    });
+      });
 
-    const response = result.response;
-    const text = response.candidates?.[0]?.content?.parts?.[0]?.text;
+      const response = result.response;
+      const candidate = response.candidates?.[0];
+      const finishReason = candidate?.finishReason as string | undefined;
+      const text = candidate?.content?.parts?.[0]?.text;
 
-    if (!text) {
-      throw new Error('No response from Gemini');
-    }
+      logger.debug({
+        finishReason,
+        textLength: text?.length,
+        attempt,
+        summarizationType,
+      }, 'Gemini summarization response received');
 
-    const parsed = JSON.parse(text);
-    const processingTimeMs = Date.now() - startTime;
+      if (!text) {
+        lastError = new Error('No response from Gemini');
+        if (attempt < RETRY_CONFIG.maxRetries - 1) continue;
+        throw lastError;
+      }
 
-    if (summarizationType === SUMMARIZATION_TYPE.CUSTDEV) {
-      const custDevResult = parsed as CustDevSummaryResult;
+      // Parse JSON with repair fallback
+      let parsed: SummaryResult | CustDevSummaryResult;
+      try {
+        parsed = JSON.parse(text);
+      } catch (parseError) {
+        logger.warn({
+          parseError: parseError instanceof Error ? parseError.message : String(parseError),
+          attempt,
+          summarizationType,
+          textLength: text.length,
+        }, 'Summarization JSON parse failed, attempting repair');
+
+        try {
+          parsed = repairAndParseJSON(text) as SummaryResult | CustDevSummaryResult;
+        } catch (repairError) {
+          if (attempt < RETRY_CONFIG.maxRetries - 1) {
+            lastError = repairError instanceof Error ? repairError : new Error(String(repairError));
+            continue;
+          }
+          throw repairError;
+        }
+      }
+
+      const processingTimeMs = Date.now() - startTime;
+
+      if (summarizationType === SUMMARIZATION_TYPE.CUSTDEV) {
+        const custDevResult = parsed as CustDevSummaryResult;
+        logger.info(
+          {
+            painPointCount: custDevResult.keyPainPoints?.length || 0,
+            suggestionCount: custDevResult.productSuggestions?.length || 0,
+            processingTimeMs,
+            summarizationType,
+            attempts: attempt + 1,
+          },
+          'CustDev summarization completed'
+        );
+        return custDevResult;
+      }
+
+      const lectureResult = parsed as SummaryResult;
       logger.info(
         {
-          painPointCount: custDevResult.keyPainPoints?.length || 0,
-          suggestionCount: custDevResult.productSuggestions?.length || 0,
+          chapterCount: lectureResult.chapters?.length || 0,
+          keyPointCount: lectureResult.keyPoints?.length || 0,
           processingTimeMs,
           summarizationType,
+          attempts: attempt + 1,
         },
-        'CustDev summarization completed'
+        'Lecture summarization completed'
       );
-      return custDevResult;
-    }
 
-    const lectureResult = parsed as SummaryResult;
-    logger.info(
-      {
-        chapterCount: lectureResult.chapters?.length || 0,
-        keyPointCount: lectureResult.keyPoints?.length || 0,
-        processingTimeMs,
+      return lectureResult;
+
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      logger.warn({
+        attempt,
+        errorMessage: lastError.message,
+        maxRetries: RETRY_CONFIG.maxRetries,
         summarizationType,
-      },
-      'Lecture summarization completed'
-    );
+      }, 'Summarization attempt failed');
 
-    return lectureResult;
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    const errorStack = error instanceof Error ? error.stack : undefined;
-    logger.error({
-      errorMessage,
-      errorStack,
-      summarizationType
-    }, 'Summarization failed');
-    throw error;
+      if (attempt >= RETRY_CONFIG.maxRetries - 1) {
+        break;
+      }
+    }
   }
+
+  // All retries exhausted
+  const errorMessage = lastError?.message || 'Unknown summarization error';
+  const errorStack = lastError?.stack;
+  logger.error({
+    errorMessage,
+    errorStack,
+    summarizationType,
+    attempts: RETRY_CONFIG.maxRetries,
+  }, 'Summarization failed after all retries');
+
+  throw lastError || new Error('Summarization failed after all retries');
 }
 
 // ============================================
