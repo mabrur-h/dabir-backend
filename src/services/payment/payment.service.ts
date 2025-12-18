@@ -434,9 +434,9 @@ export function generatePaymeUrl(
   const amountTiyin = amountUzs * 100;
 
   // Build Payme URL params - MUST include all configured requisites
-  // Set the active field to the order name, and the other to empty string
-  const planId = orderType === 'plan' ? orderName : '';
-  const packageId = orderType === 'package' ? orderName : '';
+  // Set the active field to the order name, and the other to 0 (no value)
+  const planId = orderType === 'plan' ? orderName : '0';
+  const packageId = orderType === 'package' ? orderName : '0';
 
   const params = `m=${merchantId};ac.user_id=${accountId};ac.plan_id=${planId};ac.package_id=${packageId};a=${amountTiyin}`;
   const encodedParams = Buffer.from(params).toString('base64');

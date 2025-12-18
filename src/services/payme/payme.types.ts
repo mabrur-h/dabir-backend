@@ -58,15 +58,16 @@ export interface PaymeError {
 
 // ============================================
 // ACCOUNT TYPE
-// Payme dashboard fields: user_id + plan_id (for plans) or package_id (for packages)
-// Example: { user_id: "100001", plan_id: "starter" }
-// Example: { user_id: "100001", package_id: "1hr" }
+// Payme dashboard fields: user_id + plan_id + package_id
+// We always send both plan_id and package_id, using "0" for the unused one
+// Example: { user_id: "100001", plan_id: "starter", package_id: "0" }
+// Example: { user_id: "100001", plan_id: "0", package_id: "10hr" }
 // ============================================
 
 export interface PaymeAccount {
   user_id: string;      // User's accountId (numeric)
-  plan_id?: string;     // Plan name (starter, pro, business)
-  package_id?: string;  // Package name (1hr, 5hr, 10hr)
+  plan_id: string;      // Plan name (starter, pro, business) or "0" if not applicable
+  package_id: string;   // Package name (1hr, 5hr, 10hr) or "0" if not applicable
 }
 
 // ============================================

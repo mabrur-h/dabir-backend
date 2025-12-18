@@ -40,13 +40,16 @@ const logger = createLogger('payme-service');
 
 /**
  * Parse account to extract order type and name
- * Supports Payme dashboard fields: { plan_id: "starter" } or { package_id: "1hr" }
+ * Supports Payme dashboard fields: { plan_id, package_id }
+ * One field has the actual value, the other has "0"
  */
 function parseAccount(account: PaymeAccount): ParsedOrderId | null {
-  if (account.plan_id) {
+  // Check plan_id first (not "0" and not empty)
+  if (account.plan_id && account.plan_id !== '0') {
     return { type: 'plan', name: account.plan_id };
   }
-  if (account.package_id) {
+  // Check package_id (not "0" and not empty)
+  if (account.package_id && account.package_id !== '0') {
     return { type: 'package', name: account.package_id };
   }
   return null;
@@ -607,15 +610,13 @@ async function getStatement(
 
   // Format transactions for response
   const statementTransactions: StatementTransaction[] = transactions.map((tx) => {
+    // Build account with both plan_id and package_id (one has value, other has "0")
+    const isPlan = tx.payment.paymentType === 'plan' && tx.payment.plan;
     const account: PaymeAccount = {
       user_id: tx.payment.user.accountId.toString(),
+      plan_id: isPlan ? tx.payment.plan!.name : '0',
+      package_id: !isPlan && tx.payment.package ? tx.payment.package.name : '0',
     };
-    // Add plan_id or package_id based on payment type
-    if (tx.payment.paymentType === 'plan' && tx.payment.plan) {
-      account.plan_id = tx.payment.plan.name;
-    } else if (tx.payment.package) {
-      account.package_id = tx.payment.package.name;
-    }
 
     return {
       id: tx.paymeId,
