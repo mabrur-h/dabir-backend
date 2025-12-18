@@ -353,8 +353,11 @@ export async function transcribeAudio(
         await sleep(delay);
       }
 
-      // Use streaming to get response with strict JSON schema
-      const streamResult = await genModel.generateContentStream({
+      // Use non-streaming generateContent with strict JSON schema
+      // Note: streaming + responseSchema causes "final response in stream chunk is undefined" errors
+      logger.debug({ attempt, audioSizeBytes: audioBuffer.length }, 'Sending request to Gemini');
+
+      const result = await genModel.generateContent({
         contents: [
           {
             role: 'user',
@@ -369,13 +372,18 @@ export async function transcribeAudio(
         },
       });
 
-      // Await the full response
-      const response = await streamResult.response;
+      const response = result.response;
       const candidate = response.candidates?.[0];
       const finishReason = candidate?.finishReason as string | undefined;
       const text = candidate?.content?.parts?.[0]?.text;
 
-      logger.debug({ finishReason, textLength: text?.length }, 'Gemini response received');
+      logger.debug({
+        finishReason,
+        textLength: text?.length,
+        candidateCount: response.candidates?.length,
+        hasContent: !!candidate?.content,
+        partsCount: candidate?.content?.parts?.length,
+      }, 'Gemini response received');
 
       // Check finish reason
       if (finishReason && finishReason !== 'STOP') {
