@@ -5,7 +5,7 @@ import { config } from '../../config/index.js';
 import { createLogger } from '../../utils/logger.js';
 import * as lectureService from '../lecture/lecture.service.js';
 import { addAudioExtractionJob } from '../queue/queue.service.js';
-import { getFileMd5Hash, deleteFile } from './gcs.service.js';
+import { getFileMd5Hash } from './gcs.service.js';
 import { MemoryGCSStore, createRedisClient } from './memory-gcs-store.js';
 
 const logger = createLogger('tus-service');
@@ -234,39 +234,11 @@ export function createTusServer(): TusServer {
         // The upload.id is just userId/timestamp-random, GCS stores it at that path
         const gcsUri = `gs://${config.gcp.bucketName}/${upload.id}`;
 
-        // Get content hash from GCS for deduplication
+        // Get content hash from GCS (for tracking, not deduplication)
+        // We allow users to re-upload the same file to get fresh processing
         const contentHash = await getFileMd5Hash(upload.id);
 
-        // Check for duplicate file
-        if (contentHash) {
-          const existingLecture = await lectureService.findLectureByContentHash(userId, contentHash);
-
-          if (existingLecture) {
-            logger.info(
-              {
-                uploadId: upload.id,
-                existingLectureId: existingLecture.id,
-                contentHash
-              },
-              'Duplicate file detected, returning existing lecture'
-            );
-
-            // Delete the duplicate file from GCS to save space
-            try {
-              await deleteFile(upload.id);
-              logger.info({ uploadId: upload.id }, 'Deleted duplicate file from GCS');
-            } catch (deleteError) {
-              logger.warn({ error: deleteError, uploadId: upload.id }, 'Failed to delete duplicate file');
-            }
-
-            // Return the existing lecture ID
-            res.setHeader('X-Lecture-Id', existingLecture.id);
-            res.setHeader('X-Duplicate', 'true');
-            return res;
-          }
-        }
-
-        // Create new lecture record
+        // Create new lecture record (no deduplication - always process)
         const lecture = await lectureService.createLecture({
           userId,
           title: title ?? undefined,
