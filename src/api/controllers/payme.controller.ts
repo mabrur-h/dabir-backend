@@ -70,11 +70,18 @@ function isIpAllowed(ip: string | undefined): boolean {
  */
 export async function handlePayme(req: Request, res: Response) {
   const requestId = req.body?.id || 0;
-  const clientIp = req.ip || req.socket.remoteAddress;
+
+  // Get real client IP from X-Forwarded-For header (Cloud Run sets this)
+  // Format: "client, proxy1, proxy2" - take the first one
+  const forwardedFor = req.headers['x-forwarded-for'];
+  const clientIp = forwardedFor
+    ? (Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor.split(',')[0].trim())
+    : req.ip || req.socket.remoteAddress;
 
   logger.info({
     method: req.body?.method,
     ip: clientIp,
+    forwardedFor: forwardedFor,
     hasAuth: !!req.headers.authorization,
   }, 'Received Payme request');
 
