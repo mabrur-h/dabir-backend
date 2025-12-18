@@ -19,9 +19,16 @@ export interface LectureNotification {
  */
 export async function sendLectureNotification(notification: LectureNotification): Promise<void> {
   const botWebhookUrl = config.telegram.botWebhookUrl;
-  
+  const webhookSecret = config.telegram.webhookSecret;
+
+  logger.info({
+    botWebhookUrl: botWebhookUrl ? `${botWebhookUrl.substring(0, 20)}...` : 'NOT SET',
+    hasWebhookSecret: !!webhookSecret,
+    lectureId: notification.lectureId
+  }, 'Preparing to send notification');
+
   if (!botWebhookUrl) {
-    logger.debug({ lectureId: notification.lectureId }, 'Bot webhook URL not configured, skipping notification');
+    logger.warn({ lectureId: notification.lectureId }, 'Bot webhook URL not configured, skipping notification');
     return;
   }
 
@@ -50,13 +57,15 @@ export async function sendLectureNotification(notification: LectureNotification)
       errorMessage: notification.errorMessage,
     };
 
-    logger.info({ 
-      telegramId: user.telegramId, 
+    const webhookUrl = botWebhookUrl + '/webhook/lecture';
+    logger.info({
+      telegramId: user.telegramId,
       lectureId: notification.lectureId,
-      status: notification.status 
+      status: notification.status,
+      webhookUrl,
     }, 'Sending notification to bot');
 
-    const response = await fetch(botWebhookUrl + '/webhook/lecture', {
+    const response = await fetch(webhookUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
