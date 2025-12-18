@@ -414,7 +414,8 @@ function formatPayment(payment: typeof schema.payments.$inferSelect): Payment {
 
 /**
  * Generate Payme checkout URL with account-based format
- * Format: m=MERCHANT_ID;ac.user_id=ACCOUNT_ID;ac.order_id=ORDER_TYPE_NAME;a=AMOUNT
+ * Format: m=MERCHANT_ID;ac.user_id=ACCOUNT_ID;ac.plan_id=NAME;a=AMOUNT
+ * or:    m=MERCHANT_ID;ac.user_id=ACCOUNT_ID;ac.package_id=NAME;a=AMOUNT
  */
 export function generatePaymeUrl(
   accountId: number,
@@ -430,11 +431,9 @@ export function generatePaymeUrl(
   // Payme expects amount in tiyin (1 UZS = 100 tiyin)
   const amountTiyin = amountUzs * 100;
 
-  // Build order_id: "plan_starter" or "package_1hr"
-  const orderId = `${orderType}_${orderName}`;
-
-  // Build Payme URL params
-  const params = `m=${merchantId};ac.user_id=${accountId};ac.order_id=${orderId};a=${amountTiyin}`;
+  // Build Payme URL params with correct field name (plan_id or package_id)
+  const fieldName = orderType === 'plan' ? 'plan_id' : 'package_id';
+  const params = `m=${merchantId};ac.user_id=${accountId};ac.${fieldName}=${orderName};a=${amountTiyin}`;
   const encodedParams = Buffer.from(params).toString('base64');
 
   // Use test URL in test mode
