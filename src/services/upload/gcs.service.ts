@@ -15,6 +15,8 @@ let storage: Storage;
 let bucket: Bucket;
 
 export function initializeGCS(): void {
+  const hasCredentialsFile = !!config.gcp.credentials;
+
   storage = new Storage({
     projectId: config.gcp.projectId,
     keyFilename: config.gcp.credentials,
@@ -22,7 +24,21 @@ export function initializeGCS(): void {
 
   bucket = storage.bucket(config.gcp.bucketName);
 
-  logger.info({ bucket: config.gcp.bucketName }, 'GCS initialized');
+  logger.info(
+    {
+      bucket: config.gcp.bucketName,
+      hasCredentialsFile,
+      credentialsPath: config.gcp.credentials || 'using default credentials'
+    },
+    'GCS initialized'
+  );
+
+  if (!hasCredentialsFile) {
+    logger.warn(
+      'GOOGLE_APPLICATION_CREDENTIALS not set - signed URLs may not work. ' +
+      'Set GOOGLE_APPLICATION_CREDENTIALS to a service account key file path for signed URL support.'
+    );
+  }
 }
 
 export function getStorage(): Storage {
@@ -256,18 +272,29 @@ export async function moveFile(sourcePath: string, destPath: string): Promise<st
 
 /**
  * Generate a signed URL for download
+ * Note: This requires a service account key file (GOOGLE_APPLICATION_CREDENTIALS)
+ * Default credentials from metadata server cannot sign URLs
  */
 export async function getSignedDownloadUrl(
   filePath: string,
   expiresInMinutes: number = 60
 ): Promise<string> {
-  const [url] = await getFile(filePath).getSignedUrl({
-    version: 'v4',
-    action: 'read',
-    expires: Date.now() + expiresInMinutes * 60 * 1000,
-  });
+  try {
+    const [url] = await getFile(filePath).getSignedUrl({
+      version: 'v4',
+      action: 'read',
+      expires: Date.now() + expiresInMinutes * 60 * 1000,
+    });
 
-  return url;
+    return url;
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error(
+      { errorMessage, filePath },
+      'Failed to generate signed URL. Ensure GOOGLE_APPLICATION_CREDENTIALS is set to a service account key file.'
+    );
+    throw error;
+  }
 }
 
 /**

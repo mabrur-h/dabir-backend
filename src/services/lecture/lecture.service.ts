@@ -524,8 +524,13 @@ export async function getLectureDetails(
       const { path: audioPath } = gcsService.parseGcsUri(lecture.audioGcsUri);
       // Generate a signed URL valid for 60 minutes
       audioUrl = await gcsService.getSignedDownloadUrl(audioPath, 60);
+      logger.debug({ lectureId, audioPath, hasAudioUrl: !!audioUrl }, 'Audio URL generated');
     } catch (error) {
-      logger.warn({ error, lectureId }, 'Failed to generate audio signed URL');
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error(
+        { errorMessage, lectureId, audioGcsUri: lecture.audioGcsUri },
+        'Failed to generate audio signed URL - check GCP credentials configuration'
+      );
     }
   }
 
