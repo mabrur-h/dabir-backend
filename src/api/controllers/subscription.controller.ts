@@ -3,7 +3,8 @@ import { z } from 'zod';
 import * as subscriptionService from '../../services/subscription/subscription.service.js';
 import * as paymentService from '../../services/payment/payment.service.js';
 import type { AuthenticatedRequest } from '../../types/index.js';
-import { config } from '../../config/index.js';
+import { db, schema } from '../../db/index.js';
+import { eq } from 'drizzle-orm';
 
 // ============================================
 // VALIDATION SCHEMAS
@@ -223,11 +224,26 @@ export async function activatePlanByName(
     // Paid plan - create payment first
     const payment = await paymentService.createPlanPaymentByName(user.id, planName);
 
-    // Generate payment URL (using Payme)
+    // Get user's accountId for Payme URL
+    const dbUser = await db.query.users.findFirst({
+      where: eq(schema.users.id, user.id),
+      columns: { accountId: true },
+    });
+
+    if (!dbUser) {
+      res.status(404).json({
+        success: false,
+        error: { code: 'USER_NOT_FOUND', message: 'User not found' },
+      });
+      return;
+    }
+
+    // Generate payment URL (using Payme with account format)
     const paymeUrl = paymentService.generatePaymeUrl(
-      payment.id,
-      payment.amountUzs,
-      config.payme?.merchantId || 'DEMO_MERCHANT'
+      dbUser.accountId,
+      'plan',
+      planName,
+      payment.amountUzs
     );
 
     res.json({
@@ -289,11 +305,26 @@ export async function purchasePackageByName(
     // Create payment for package
     const payment = await paymentService.createPackagePaymentByName(user.id, packageName);
 
-    // Generate payment URL
+    // Get user's accountId for Payme URL
+    const dbUser = await db.query.users.findFirst({
+      where: eq(schema.users.id, user.id),
+      columns: { accountId: true },
+    });
+
+    if (!dbUser) {
+      res.status(404).json({
+        success: false,
+        error: { code: 'USER_NOT_FOUND', message: 'User not found' },
+      });
+      return;
+    }
+
+    // Generate payment URL (using Payme with account format)
     const paymeUrl = paymentService.generatePaymeUrl(
-      payment.id,
-      payment.amountUzs,
-      config.payme.merchantId || 'DEMO_MERCHANT'
+      dbUser.accountId,
+      'package',
+      packageName,
+      payment.amountUzs
     );
 
     res.json({

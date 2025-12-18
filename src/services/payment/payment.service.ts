@@ -3,6 +3,7 @@ import { db, schema } from '../../db/index.js';
 import { createLogger } from '../../utils/logger.js';
 import { BadRequestError, NotFoundError } from '../../utils/errors.js';
 import * as subscriptionService from '../subscription/subscription.service.js';
+import { config } from '../../config/index.js';
 
 const logger = createLogger('payment-service');
 
@@ -412,28 +413,36 @@ function formatPayment(payment: typeof schema.payments.$inferSelect): Payment {
 // ============================================
 
 /**
- * Generate Payme checkout URL
- * This creates the URL that users click to pay
+ * Generate Payme checkout URL with account-based format
+ * Format: m=MERCHANT_ID;ac.user_id=ACCOUNT_ID;ac.order_id=ORDER_TYPE_NAME;a=AMOUNT
  */
 export function generatePaymeUrl(
-  paymentId: string,
-  amountUzs: number,
-  merchantId: string
+  accountId: number,
+  orderType: 'plan' | 'package',
+  orderName: string,
+  amountUzs: number
 ): string {
+  const merchantId = config.payme.merchantId;
+  if (!merchantId) {
+    throw new Error('PAYME_MERCHANT_ID not configured');
+  }
+
   // Payme expects amount in tiyin (1 UZS = 100 tiyin)
   const amountTiyin = amountUzs * 100;
 
-  // Encode account data (payment ID as order reference)
-  const account = Buffer.from(
-    JSON.stringify({ order_id: paymentId })
-  ).toString('base64');
+  // Build order_id: "plan_starter" or "package_1hr"
+  const orderId = `${orderType}_${orderName}`;
 
-  // Build Payme URL
-  // Format: https://checkout.paycom.uz/BASE64_ENCODED_PARAMS
-  const params = `m=${merchantId};ac.order_id=${paymentId};a=${amountTiyin}`;
+  // Build Payme URL params
+  const params = `m=${merchantId};ac.user_id=${accountId};ac.order_id=${orderId};a=${amountTiyin}`;
   const encodedParams = Buffer.from(params).toString('base64');
 
-  return `https://checkout.paycom.uz/${encodedParams}`;
+  // Use test URL in test mode
+  const baseUrl = config.payme.testMode
+    ? 'https://checkout.test.paycom.uz'
+    : 'https://checkout.paycom.uz';
+
+  return `${baseUrl}/${encodedParams}`;
 }
 
 /**

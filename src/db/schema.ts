@@ -11,6 +11,7 @@ import {
   index,
   bigint,
   boolean,
+  serial,
 } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
@@ -45,6 +46,9 @@ export const users = pgTable(
     // Auth provider tracking
     authProvider: varchar('auth_provider', { length: 50 }).default('google').notNull(), // 'google' | 'telegram'
 
+    // Short numeric ID for payment providers (Payme, Click)
+    accountId: serial('account_id').notNull(),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -52,6 +56,7 @@ export const users = pgTable(
     emailIdx: uniqueIndex('users_email_idx').on(table.email),
     googleIdIdx: uniqueIndex('users_google_id_idx').on(table.googleId),
     telegramIdIdx: uniqueIndex('users_telegram_id_idx').on(table.telegramId),
+    accountIdIdx: uniqueIndex('users_account_id_idx').on(table.accountId),
   })
 );
 
@@ -766,5 +771,51 @@ export const paymentsRelations = relations(payments, ({ one }) => ({
   package: one(minutePackages, {
     fields: [payments.packageId],
     references: [minutePackages.id],
+  }),
+  paymeTransaction: one(paymeTransactions),
+}));
+
+// ============================================
+// PAYME TRANSACTIONS (Payme.uz specific data)
+// ============================================
+export const paymeTransactions = pgTable(
+  'payme_transactions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    paymentId: uuid('payment_id')
+      .notNull()
+      .references(() => payments.id, { onDelete: 'cascade' }),
+
+    // Payme transaction ID (from Payme Business)
+    paymeId: varchar('payme_id', { length: 255 }).notNull().unique(),
+
+    // Payme timestamps (in milliseconds)
+    time: bigint('time', { mode: 'number' }).notNull(), // Transaction creation time from Payme
+    amount: integer('amount').notNull(), // Amount in tiyin
+
+    // Transaction state: 1 = created, 2 = completed, -1 = cancelled before perform, -2 = cancelled after perform
+    state: integer('state').notNull().default(1),
+    reason: integer('reason'), // Cancel reason code
+
+    // Timestamps in merchant system (milliseconds)
+    createTime: bigint('create_time', { mode: 'number' }),
+    performTime: bigint('perform_time', { mode: 'number' }),
+    cancelTime: bigint('cancel_time', { mode: 'number' }),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    paymentIdx: index('payme_transactions_payment_idx').on(table.paymentId),
+    stateIdx: index('payme_transactions_state_idx').on(table.state),
+    paymeIdIdx: uniqueIndex('payme_transactions_payme_id_idx').on(table.paymeId),
+    timeIdx: index('payme_transactions_time_idx').on(table.time),
+  })
+);
+
+export const paymeTransactionsRelations = relations(paymeTransactions, ({ one }) => ({
+  payment: one(payments, {
+    fields: [paymeTransactions.paymentId],
+    references: [payments.id],
   }),
 }));

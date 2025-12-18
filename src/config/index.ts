@@ -56,6 +56,7 @@ const envSchema = z.object({
   // Payment (Payme)
   PAYME_MERCHANT_ID: z.string().optional(),
   PAYME_SECRET_KEY: z.string().optional(),
+  PAYME_TEST_MODE: z.string().transform((v) => v === 'true').default('false'),
 
   // Google OAuth (optional for workers that don't handle auth)
   GOOGLE_CLIENT_ID: z.string().optional(),
@@ -141,6 +142,7 @@ export const config = {
   payme: {
     merchantId: env.PAYME_MERCHANT_ID,
     secretKey: env.PAYME_SECRET_KEY,
+    testMode: env.PAYME_TEST_MODE,
   },
 
   google: {

@@ -14,6 +14,15 @@ export interface LectureNotification {
   errorMessage?: string;
 }
 
+export interface PaymentNotification {
+  userId: string;
+  telegramId: number;
+  status: 'success' | 'failed' | 'cancelled';
+  amount: number;
+  paymentType: 'plan' | 'package';
+  itemName: string;
+}
+
 /**
  * Send notification to Telegram bot when lecture processing completes
  */
@@ -85,5 +94,63 @@ export async function sendLectureNotification(notification: LectureNotification)
     }
   } catch (error) {
     logger.error({ error, lectureId: notification.lectureId }, 'Error sending notification to bot');
+  }
+}
+
+/**
+ * Send payment notification to Telegram bot
+ */
+export async function sendPaymentNotification(notification: PaymentNotification): Promise<void> {
+  const botWebhookUrl = config.telegram.botWebhookUrl;
+
+  logger.info({
+    botWebhookUrl: botWebhookUrl ? `${botWebhookUrl.substring(0, 20)}...` : 'NOT SET',
+    telegramId: notification.telegramId,
+    status: notification.status,
+  }, 'Preparing to send payment notification');
+
+  if (!botWebhookUrl) {
+    logger.warn('Bot webhook URL not configured, skipping payment notification');
+    return;
+  }
+
+  try {
+    const payload = {
+      type: 'payment_notification',
+      telegramId: notification.telegramId,
+      status: notification.status,
+      amount: notification.amount,
+      paymentType: notification.paymentType,
+      itemName: notification.itemName,
+    };
+
+    const webhookUrl = botWebhookUrl + '/webhook/payment';
+    logger.info({
+      telegramId: notification.telegramId,
+      status: notification.status,
+      amount: notification.amount,
+      webhookUrl,
+    }, 'Sending payment notification to bot');
+
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + config.telegram.webhookSecret,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      logger.error({
+        status: response.status,
+        error: errorText
+      }, 'Failed to send payment notification to bot');
+    } else {
+      logger.info({ telegramId: notification.telegramId }, 'Payment notification sent successfully');
+    }
+  } catch (error) {
+    logger.error({ error, telegramId: notification.telegramId }, 'Error sending payment notification to bot');
   }
 }

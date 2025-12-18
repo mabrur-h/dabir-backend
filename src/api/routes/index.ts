@@ -8,6 +8,7 @@ import foldersRoutes from './folders.routes.js';
 import tagsRoutes from './tags.routes.js';
 import publicShareRoutes, { shareUtilRouter } from './shares.routes.js';
 import subscriptionRoutes from './subscription.routes.js';
+import paymeRoutes from './payme.routes.js';
 
 const router = Router();
 
@@ -22,6 +23,9 @@ router.use('/api/v1/users', usersRoutes);
 router.use('/api/v1/folders', foldersRoutes);
 router.use('/api/v1/tags', tagsRoutes);
 router.use('/api/v1/subscription', subscriptionRoutes);
+
+// Payment provider routes (Payme Merchant API)
+router.use('/api/v1/payme', paymeRoutes);
 
 // Share routes
 router.use('/api/v1/shares', shareUtilRouter); // Authenticated utility routes (check-slug)
