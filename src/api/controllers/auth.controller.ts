@@ -387,7 +387,7 @@ export async function initTelegramLink(
     const { user } = req as AuthenticatedRequest;
 
     // Get bot username from config or use default
-    const botUsername = process.env.TELEGRAM_BOT_USERNAME || 'dabirbot';
+    const botUsername = process.env.TELEGRAM_BOT_USERNAME || 'majlees_ai_bot';
 
     const result = await accountLinkingService.initTelegramLink(user.id, botUsername);
 
