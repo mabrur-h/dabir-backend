@@ -74,9 +74,13 @@ export async function handlePayme(req: Request, res: Response) {
   // Get real client IP from X-Forwarded-For header (Cloud Run sets this)
   // Format: "client, proxy1, proxy2" - take the first one
   const forwardedFor = req.headers['x-forwarded-for'];
-  const clientIp = forwardedFor
-    ? (Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor.split(',')[0].trim())
-    : req.ip || req.socket.remoteAddress;
+  let clientIp: string | undefined;
+  if (forwardedFor) {
+    const firstIp = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor.split(',')[0];
+    clientIp = firstIp?.trim();
+  } else {
+    clientIp = req.ip || req.socket.remoteAddress;
+  }
 
   logger.info({
     method: req.body?.method,
