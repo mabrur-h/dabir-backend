@@ -405,7 +405,8 @@ async function fetchTagsForLectures(lectureIds: string[]): Promise<Record<string
 
 /**
  * Find an existing lecture by content hash for deduplication
- * Returns lecture if a completed/processing file with same hash exists for the user
+ * Only returns lectures that are successfully COMPLETED - this ensures we don't
+ * return stuck/failed lectures and allows users to re-upload if processing failed.
  */
 export async function findLectureByContentHash(
   userId: string,
@@ -415,8 +416,11 @@ export async function findLectureByContentHash(
     where: and(
       eq(schema.lectures.userId, userId),
       eq(schema.lectures.contentHash, contentHash),
-      // Only match non-failed lectures
-      sql`${schema.lectures.status} != 'failed'`
+      // Only match COMPLETED lectures - this allows re-upload if:
+      // - Original upload failed to process
+      // - Original got stuck in 'uploaded' or 'processing' state
+      // - Original was marked as 'failed'
+      eq(schema.lectures.status, LECTURE_STATUS.COMPLETED)
     ),
     orderBy: [desc(schema.lectures.createdAt)],
   });
@@ -426,8 +430,8 @@ export async function findLectureByContentHash(
   }
 
   logger.info(
-    { lectureId: lecture.id, userId, contentHash },
-    'Found existing lecture with same content hash'
+    { lectureId: lecture.id, userId, contentHash, status: lecture.status },
+    'Found existing completed lecture with same content hash'
   );
 
   return formatLecture(lecture);
