@@ -23,7 +23,11 @@ const uploadMetadataSchema = z.object({
 function isAllowedMimeType(mimeType: string): boolean {
   // Extract base MIME type (before any semicolon for codec params)
   const baseMimeType = (mimeType.split(';')[0] ?? mimeType).trim();
-  return config.upload.allowedMimeTypes.includes(baseMimeType);
+  const isAllowed = config.upload.allowedMimeTypes.includes(baseMimeType);
+  if (!isAllowed) {
+    logger.warn({ mimeType, baseMimeType, allowedTypes: config.upload.allowedMimeTypes }, 'MIME type rejected');
+  }
+  return isAllowed;
 }
 
 // Multer configuration for memory storage

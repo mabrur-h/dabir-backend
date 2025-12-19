@@ -40,7 +40,7 @@ const envSchema = z.object({
 
   // File Upload
   MAX_FILE_SIZE_BYTES: z.string().transform(Number).default('5368709120'),
-  ALLOWED_MIME_TYPES: z.string().default('audio/mpeg,audio/wav,audio/flac,video/mp4'),
+  ALLOWED_MIME_TYPES: z.string().default('audio/mpeg,audio/wav,audio/flac,audio/ogg,audio/mp4,audio/x-m4a,video/mp4,video/webm,video/quicktime'),
 
   // FFmpeg
   FFMPEG_PATH: z.string().optional(),
