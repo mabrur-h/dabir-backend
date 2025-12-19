@@ -17,6 +17,15 @@ const uploadMetadataSchema = z.object({
   title: z.string().max(500).optional(),
 });
 
+/**
+ * Check if a MIME type is allowed, handling codec parameters like "audio/ogg; codecs=opus"
+ */
+function isAllowedMimeType(mimeType: string): boolean {
+  // Extract base MIME type (before any semicolon for codec params)
+  const baseMimeType = (mimeType.split(';')[0] ?? mimeType).trim();
+  return config.upload.allowedMimeTypes.includes(baseMimeType);
+}
+
 // Multer configuration for memory storage
 const storage = multer.memoryStorage();
 export const upload = multer({
@@ -25,7 +34,7 @@ export const upload = multer({
     fileSize: config.upload.maxFileSizeBytes,
   },
   fileFilter: (_req, file, cb) => {
-    if (config.upload.allowedMimeTypes.includes(file.mimetype)) {
+    if (isAllowedMimeType(file.mimetype)) {
       cb(null, true);
     } else {
       cb(new Error('File type ' + file.mimetype + ' is not allowed'));

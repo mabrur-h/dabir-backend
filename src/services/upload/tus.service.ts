@@ -179,8 +179,10 @@ export function createTusServer(): TusServer {
             // Keep original if decode fails
           }
         }
-        logger.debug({ mimeType, allowed: config.upload.allowedMimeTypes }, 'Checking mime type');
-        if (!config.upload.allowedMimeTypes.includes(mimeType)) {
+        // Extract base MIME type (before any semicolon for codec params like "audio/ogg; codecs=opus")
+        const baseMimeType = (mimeType.split(';')[0] ?? mimeType).trim();
+        logger.debug({ mimeType, baseMimeType, allowed: config.upload.allowedMimeTypes }, 'Checking mime type');
+        if (!config.upload.allowedMimeTypes.includes(baseMimeType)) {
           throw { status_code: 415, body: `File type ${mimeType} is not allowed` };
         }
       }
