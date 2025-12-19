@@ -61,11 +61,18 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   }
 
   // Handle unknown errors
+  // Log the full error for debugging
+  const errorMessage = err instanceof Error ? err.message : String(err);
+  const errorStack = err instanceof Error ? err.stack : undefined;
+  logger.error({ errorMessage, errorStack, errType: err?.constructor?.name }, 'Unhandled error details');
+
   res.status(500).json({
     success: false,
     error: {
       code: 'INTERNAL_ERROR',
       message: 'An unexpected error occurred',
+      // Include error message in response for debugging (consider removing in production)
+      details: errorMessage,
     },
   });
 };

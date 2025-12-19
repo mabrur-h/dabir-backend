@@ -71,6 +71,7 @@ export async function uploadFile(
       filename: file.originalname,
       size: file.size,
       mimeType: file.mimetype,
+      buffer: file.buffer ? `Buffer(${file.buffer.length})` : 'undefined',
     }, 'Processing simple upload');
 
     // Parse metadata from form fields

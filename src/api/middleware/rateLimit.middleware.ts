@@ -23,10 +23,50 @@ const getUserKeyGenerator = (req: Request): string => {
 
 /**
  * IP-only key generator for unauthenticated routes
- * Note: We disable the IPv6 validation since we handle it manually
+ * Uses X-Forwarded-For header when behind a proxy (Cloud Run)
  */
 const getIpKeyGenerator = (req: Request): string => {
+  // Get real IP from X-Forwarded-For if behind proxy
+  const forwardedFor = req.headers['x-forwarded-for'];
+  if (forwardedFor) {
+    const ips = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor.split(',')[0];
+    if (ips) return ips.trim();
+  }
   return req.ip || req.socket.remoteAddress || 'unknown';
+};
+
+/**
+ * Auth key generator that tries to extract Telegram ID from request body
+ * Falls back to IP if no Telegram ID is found
+ * This allows per-user rate limiting even for unauthenticated auth requests
+ */
+const getAuthKeyGenerator = (req: Request): string => {
+  // Try to extract telegram ID from various auth request formats
+  const body = req.body as Record<string, unknown>;
+
+  // For Telegram auth: check initData or telegramId in body
+  if (body?.telegramId) {
+    return `tg:${body.telegramId}`;
+  }
+
+  // For initData-based auth, try to extract user ID
+  if (body?.initData && typeof body.initData === 'string') {
+    try {
+      const params = new URLSearchParams(body.initData);
+      const userParam = params.get('user');
+      if (userParam) {
+        const user = JSON.parse(decodeURIComponent(userParam));
+        if (user?.id) {
+          return `tg:${user.id}`;
+        }
+      }
+    } catch {
+      // Failed to parse, fall back to IP
+    }
+  }
+
+  // Fall back to IP-based limiting
+  return getIpKeyGenerator(req);
 };
 
 /**
@@ -109,17 +149,19 @@ export const uploadRateLimiter = createRedisRateLimiter('rl:upload:', {
 /**
  * Auth rate limiter (stricter for security)
  * Applies to login/register endpoints
- * Development: 100 attempts per 15 minutes per IP
- * Production: 10 attempts per 15 minutes per IP
+ * Uses Telegram ID from request body when available, falls back to IP
+ * Development: 100 attempts per 15 minutes per user/IP
+ * Production: 30 attempts per 15 minutes per user/IP
  */
 export const authRateLimiter = createRedisRateLimiter('rl:auth:', {
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: config.server.isDev ? 100 : 10, // More lenient in development
+  max: config.server.isDev ? 100 : 30, // Increased from 10 since it's now per-user
   message: 'Too many authentication attempts. Please try again later.',
-  keyGenerator: getIpKeyGenerator,
+  keyGenerator: getAuthKeyGenerator,
   handler: (req: Request, res: Response) => {
     logger.warn({
-      ip: req.ip,
+      ip: getIpKeyGenerator(req),
+      key: getAuthKeyGenerator(req),
       path: req.path
     }, 'Auth rate limit exceeded');
 

@@ -17,6 +17,10 @@ const logger = createLogger('app');
 export const createApp = () => {
   const app = express();
 
+  // Trust proxy - required for Cloud Run to get real client IPs from X-Forwarded-For
+  // This is necessary for rate limiting to work correctly
+  app.set('trust proxy', true);
+
   // Security middleware
   app.use(
     helmet({
